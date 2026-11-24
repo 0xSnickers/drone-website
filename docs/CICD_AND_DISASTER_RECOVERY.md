@@ -20,6 +20,7 @@
 
 | 文件路径 | 作用说明 |
 | --- | --- |
+| `.github/workflows/ci-cd.yml` | GitHub Actions 全自动 CI/CD：4 端并行检查 + Postgres 16 / Redis 7 真库契约集成测试 + 自动构建推送 `ghcr.io` 三端镜像 + 可选 SSH 远程自动上线 |
 | `docker-compose.prod.yml` | 生产容器编排：默认启动单机容灾基线（`postgres` + `server` + `web` + `admin`）；加 `--profile ha` 一键拉起 `redis` + `worker` 异步消费队列 |
 | `deploy/web.Dockerfile` | 前台官网多阶段构建（Node 26 构建静态资源 -> Nginx 1.28 Alpine 托管） |
 | `deploy/admin.Dockerfile` | 管理后台多阶段构建（以仓库根目录为上下文，包含 `../sdk` 源码别名依赖） |
