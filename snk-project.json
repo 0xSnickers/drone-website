@@ -1,0 +1,12 @@
+{
+  "name": "drone-website",
+  "frontend": "react",
+  "backend": "django",
+  "template": {
+    "schemaVersion": 1,
+    "version": "1.0.0",
+    "sha256": "a313c6419bdea719fe289613fc5581d2d2b9e8f198685e732134b63cbdb241d0",
+    "files": 733,
+    "bytes": 3415862
+  }
+}

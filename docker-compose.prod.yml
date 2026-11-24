@@ -1,0 +1,110 @@
+# 生产环境容器编排：
+# - 默认启动档位 1（单机容灾基线）：postgres + server + web + admin
+# - 附加 `--profile ha` 一键启动档位 2/3（异步队列削峰）：额外启动 redis + worker
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-drone_website_server}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-drone_website_server}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["ha"]
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY:-512mb}
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${PROD_ENV_FILE:-./deploy/.env.prod.example}
+    environment:
+      RUN_MIGRATIONS_ON_START: ${RUN_MIGRATIONS_ON_START:-false}
+      LOG_FILE: ""
+    ports:
+      - "127.0.0.1:${SERVER_HOST_PORT:-9000}:9000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/api/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    profiles: ["ha"]
+    command: ["worker"]
+    restart: unless-stopped
+    env_file:
+      - ${PROD_ENV_FILE:-./deploy/.env.prod.example}
+    environment:
+      LOG_FILE: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/web.Dockerfile
+      args:
+        VITE_APP_ENV: production
+        VITE_APP_RELEASE: ${VITE_APP_RELEASE:-unknown}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-5173}:80"
+
+  admin:
+    build:
+      context: .
+      dockerfile: deploy/admin.Dockerfile
+      args:
+        VITE_APP_ENV: production
+        VITE_APP_RELEASE: ${VITE_APP_RELEASE:-unknown}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        VITE_MONITOR_ENDPOINT: ${VITE_MONITOR_ENDPOINT:-/api}
+        VITE_MONITOR_APP_KEY: ${VITE_MONITOR_APP_KEY:-}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ADMIN_HOST_PORT:-5174}:80"
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,67 @@
+import type { AccessoryItem, StoreCategoryId } from '../types';
+
+export const storeCategories: { id: StoreCategoryId; labelKey: string }[] = [
+  { id: 'all', labelKey: 'store.categories.all' },
+  { id: 'battery', labelKey: 'store.categories.battery' },
+  { id: 'gimbal', labelKey: 'store.categories.gimbal' },
+  { id: 'controller', labelKey: 'store.categories.controller' },
+  { id: 'bag', labelKey: 'store.categories.bag' },
+  { id: 'care', labelKey: 'store.categories.care' },
+];
+
+export const officialAccessories: AccessoryItem[] = [
+  {
+    id: 'v8-pro-battery',
+    category: 'battery',
+    titleKey: 'store.accessories.items.batteryTitle',
+    descKey: 'store.accessories.items.batteryDesc',
+    chipKey: 'store.accessories.items.batteryChip',
+    promoKey: 'store.accessories.items.batteryPromo',
+    promoTone: 'secondary',
+    price: 899,
+    originalPrice: 1049,
+    art: 'battery',
+  },
+  {
+    id: 'apex-rc-pro',
+    category: 'controller',
+    titleKey: 'store.accessories.items.rcProTitle',
+    descKey: 'store.accessories.items.rcProDesc',
+    chipKey: 'store.accessories.items.rcProChip',
+    promoKey: 'store.accessories.items.rcProPromo',
+    promoTone: 'primary',
+    price: 2999,
+    art: 'controller',
+  },
+  {
+    id: 'charging-hub-100w',
+    category: 'battery',
+    titleKey: 'store.accessories.items.hubTitle',
+    descKey: 'store.accessories.items.hubDesc',
+    chipKey: 'store.accessories.items.hubChip',
+    price: 399,
+    art: 'hub',
+  },
+  {
+    id: 'hasselblad-nd-pack',
+    category: 'gimbal',
+    titleKey: 'store.accessories.items.ndTitle',
+    descKey: 'store.accessories.items.ndDesc',
+    chipKey: 'store.accessories.items.ndChip',
+    promoKey: 'store.accessories.items.ndPromo',
+    promoTone: 'primary',
+    price: 499,
+    art: 'filter',
+  },
+  {
+    id: 'carbon-tactical-case',
+    category: 'bag',
+    titleKey: 'store.accessories.items.caseTitle',
+    descKey: 'store.accessories.items.caseDesc',
+    chipKey: 'store.accessories.items.caseChip',
+    promoKey: 'store.accessories.items.casePromo',
+    promoTone: 'primary',
+    price: 799,
+    art: 'case',
+  },
+];
