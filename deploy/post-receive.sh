@@ -48,7 +48,7 @@ if [ "$DEPLOY_MODE" = "local" ]; then
   (cd "$WORK_DIR/server" && ([ -d .venv ] || uv sync --frozen) && ./scripts/test.sh)
   (cd "$WORK_DIR/web" && ([ -d node_modules ] || npm ci) && npm run check)
   (cd "$WORK_DIR/admin" && ([ -d node_modules ] || npm ci) && npm run check)
-  if [ -d "$WORK_DIR/sdk/node_modules" ]; then
+  if [ -x "$WORK_DIR/sdk/node_modules/.bin/eslint" ]; then
     (cd "$WORK_DIR/sdk" && npm run check)
   else
     cat <<EOF > "${BASE_DIR}/sdk-vitest.mjs"
@@ -90,7 +90,7 @@ EOF
         --timeout "${GUNICORN_TIMEOUT:-30}" \
         --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-15}" \
         --pid "$GUNICORN_PID_FILE" \
-        --daemon
+        --daemon </dev/null >/dev/null 2>&1 9>&-
     )
   fi
 
@@ -117,14 +117,34 @@ http {
     listen 127.0.0.1:${WEB_PORT};
     root ${BASE_DIR}/releases/web;
     index index.html;
-    location = /api/health { proxy_pass http://stage_server/api/health; }
-    location = /api/ready  { proxy_pass http://stage_server/api/ready; }
+    location = /api/health { proxy_http_version 1.1; proxy_set_header Connection ""; proxy_set_header Host \$host; proxy_pass http://stage_server/api/health; }
+    location = /api/ready  { proxy_http_version 1.1; proxy_set_header Connection ""; proxy_set_header Host \$host; proxy_pass http://stage_server/api/ready; }
+    location /api/v1/ingest/ {
+      limit_req zone=stage_ingest_limit burst=40 nodelay;
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header Host \$host;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_pass http://stage_server/api/v1/ingest/;
+    }
+    location /api/v1/ {
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header Host \$host;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_pass http://stage_server/api/v1/;
+    }
     location /api/ingest/  {
       limit_req zone=stage_ingest_limit burst=40 nodelay;
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header Host \$host;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_pass http://stage_server/api/v1/ingest/;
     }
     location /api/ {
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
       proxy_set_header Host \$host;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_pass http://stage_server/api/v1/;
@@ -136,9 +156,26 @@ http {
     listen 127.0.0.1:${ADMIN_PORT};
     root ${BASE_DIR}/releases/admin;
     index index.html;
-    location = /api/health { proxy_pass http://stage_server/api/health; }
-    location = /api/ready  { proxy_pass http://stage_server/api/ready; }
+    location = /api/health { proxy_http_version 1.1; proxy_set_header Connection ""; proxy_set_header Host \$host; proxy_pass http://stage_server/api/health; }
+    location = /api/ready  { proxy_http_version 1.1; proxy_set_header Connection ""; proxy_set_header Host \$host; proxy_pass http://stage_server/api/ready; }
+    location /api/v1/ingest/ {
+      limit_req zone=stage_ingest_limit burst=40 nodelay;
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header Host \$host;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_pass http://stage_server/api/v1/ingest/;
+    }
+    location /api/v1/ {
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header Host \$host;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_pass http://stage_server/api/v1/;
+    }
     location /api/ {
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
       proxy_set_header Host \$host;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_pass http://stage_server/api/v1/;
@@ -149,9 +186,9 @@ http {
 EOF
   /usr/sbin/nginx -t -c "${BASE_DIR}/run/nginx.conf" -p "${BASE_DIR}" >/dev/null 2>&1
   if [ -f "${BASE_DIR}/run/nginx.pid" ] && kill -0 "$(cat "${BASE_DIR}/run/nginx.pid")" 2>/dev/null; then
-    /usr/sbin/nginx -c "${BASE_DIR}/run/nginx.conf" -p "${BASE_DIR}" -s reload
+    /usr/sbin/nginx -c "${BASE_DIR}/run/nginx.conf" -p "${BASE_DIR}" -s reload </dev/null >/dev/null 2>&1 9>&-
   else
-    /usr/sbin/nginx -c "${BASE_DIR}/run/nginx.conf" -p "${BASE_DIR}"
+    /usr/sbin/nginx -c "${BASE_DIR}/run/nginx.conf" -p "${BASE_DIR}" </dev/null >/dev/null 2>&1 9>&-
   fi
 
   echo "===> [5/5] 通过 Nginx 网关验证前后端就绪探针 (/api/ready)"
