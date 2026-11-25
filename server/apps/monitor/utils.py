@@ -124,9 +124,14 @@ def check_ingest_rate_limit(ip: str) -> bool:
 
 
 def parse_json_body(request) -> dict:
-    if isinstance(request.data, dict):
-        return request.data
-    raw = request.body.decode("utf-8", errors="replace").strip()
+    data = request.data
+    if isinstance(data, dict):
+        return data
+    raw = (
+        data.strip()
+        if isinstance(data, str)
+        else request.body.decode("utf-8", errors="replace").strip()
+    )
     if not raw:
         return {}
     try:

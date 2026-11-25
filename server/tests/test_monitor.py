@@ -91,9 +91,18 @@ def test_ingest_events_errors_analytics_and_ip_block(client, admin_headers):
     assert ok_res.status_code == 200
     assert ok_res.json()["data"]["accepted"] == 3
 
+    # Browser monitor-sdk sends JSON payload with text/plain Content-Type (sendBeacon / CORS-free)
+    beacon_res = client.post(
+        "/api/v1/ingest/events",
+        f'{{"appKey":"{app_key}","events":[{{"type":"pageview","url":"http://localhost:5174/"}}]}}',
+        content_type="text/plain;charset=UTF-8",
+    )
+    assert beacon_res.status_code == 200
+    assert beacon_res.json()["data"]["accepted"] == 1
+
     overview = client.get(f"/api/v1/analytics/overview?projectId={project_id}", **admin_headers)
     assert overview.status_code == 200
-    assert overview.json()["data"]["current"]["pv"] == 1
+    assert overview.json()["data"]["current"]["pv"] == 2
     assert overview.json()["data"]["current"]["errors"] == 1
 
     issues = client.get(f"/api/v1/errors/issues?projectId={project_id}", **admin_headers)

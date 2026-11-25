@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # Git 裸仓库自动 CI/CD 钩子
-# 支持两种运行模式（通过环境变量 DEPLOY_MODE 切换）：
+# 支持两种运行模式（可在 .env.prod 中通过 DEPLOY_MODE 切换）：
 #   - docker（默认生产模式）：容器化跑 4 端 CI + Docker Compose 独立迁移与滚动更新
-#   - local（本机进程/测试环境模式）：使用工作区工具链跑 4 端 CI + Gunicorn SIGHUP 零停机热重载 + 独立 Nginx 网关
+#   - local（独立隔离网关模式）：使用工作区工具链跑 4 端 CI + Gunicorn SIGHUP 零停机热重载 + 独立进程 Nginx（不触碰 /etc/nginx）
 set -euo pipefail
 
-BASE_DIR="${DRONE_DEPLOY_BASE:-/srv/drone-website}"
+HOOK_REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BASE_DIR="${DRONE_DEPLOY_BASE:-$(dirname "$HOOK_REPO_DIR")}"
 REPO_DIR="${BASE_DIR}/repo.git"
 WORK_DIR="${BASE_DIR}/work"
 LOCK_FILE="${BASE_DIR}/deploy.lock"
 ENV_FILE="${BASE_DIR}/.env.prod"
-DEPLOY_MODE="${DEPLOY_MODE:-docker}"
-ENABLE_HA_PROFILE="${ENABLE_HA_PROFILE:-false}"
 ZERO_REV="0000000000000000000000000000000000000000"
 
 DEPLOY=false
@@ -28,7 +27,6 @@ exec 9>"$LOCK_FILE"
 flock 9
 
 SHORT_SHA="${NEW_REV:0:8}"
-echo "===> [1/5] 检出 main 分支代码 (${SHORT_SHA}, mode=${DEPLOY_MODE})"
 mkdir -p "$WORK_DIR"
 git --work-tree="$WORK_DIR" --git-dir="$REPO_DIR" checkout -f main
 unset GIT_DIR GIT_WORK_TREE
@@ -42,6 +40,10 @@ if [ -f "$ENV_FILE" ]; then
   . "$ENV_FILE"
   set +a
 fi
+
+DEPLOY_MODE="${DEPLOY_MODE:-docker}"
+ENABLE_HA_PROFILE="${ENABLE_HA_PROFILE:-false}"
+echo "===> [1/5] 已检出 main 分支代码 (${SHORT_SHA}, mode=${DEPLOY_MODE})"
 
 if [ "$DEPLOY_MODE" = "local" ]; then
   echo "===> [2/5] 执行 4 端 CI 门禁检查（失败即中止，线上旧进程零影响）"
@@ -72,8 +74,9 @@ EOF
   mv "${BASE_DIR}/releases/web.next" "${BASE_DIR}/releases/web"
   mv "${BASE_DIR}/releases/admin.next" "${BASE_DIR}/releases/admin"
 
-  echo "===> [4/5] 零停机热重载 Gunicorn 与 Nginx 反向代理网关"
-  PORT="${PORT:-19000}"
+  echo "===> [4/5] 零停机热重载 Gunicorn 与独立 Nginx 反向代理网关"
+  PORT="${PORT:-19100}"
+  BIND_HOST="${BIND_HOST:-0.0.0.0}"
   WEB_PORT="${WEB_HOST_PORT:-18080}"
   ADMIN_PORT="${ADMIN_HOST_PORT:-18081}"
   GUNICORN_PID_FILE="${BASE_DIR}/run/gunicorn.pid"
@@ -110,11 +113,15 @@ http {
   uwsgi_temp_path ${BASE_DIR}/nginx_tmp/uwsgi;
   scgi_temp_path ${BASE_DIR}/nginx_tmp/scgi;
 
+  gzip on;
+  gzip_min_length 1024;
+  gzip_types text/plain text/css application/json application/javascript image/svg+xml;
+
   limit_req_zone \$binary_remote_addr zone=stage_ingest_limit:10m rate=20r/s;
   upstream stage_server { server 127.0.0.1:${PORT} max_fails=2 fail_timeout=5s; keepalive 16; }
 
   server {
-    listen 127.0.0.1:${WEB_PORT};
+    listen ${BIND_HOST}:${WEB_PORT};
     root ${BASE_DIR}/releases/web;
     index index.html;
     location = /api/health { proxy_http_version 1.1; proxy_set_header Connection ""; proxy_set_header Host \$host; proxy_pass http://stage_server/api/health; }
@@ -153,7 +160,7 @@ http {
   }
 
   server {
-    listen 127.0.0.1:${ADMIN_PORT};
+    listen ${BIND_HOST}:${ADMIN_PORT};
     root ${BASE_DIR}/releases/admin;
     index index.html;
     location = /api/health { proxy_http_version 1.1; proxy_set_header Connection ""; proxy_set_header Host \$host; proxy_pass http://stage_server/api/health; }
@@ -191,7 +198,7 @@ EOF
     /usr/sbin/nginx -c "${BASE_DIR}/run/nginx.conf" -p "${BASE_DIR}" </dev/null >/dev/null 2>&1 9>&-
   fi
 
-  echo "===> [5/5] 通过 Nginx 网关验证前后端就绪探针 (/api/ready)"
+  echo "===> [5/5] 通过独立 Nginx 网关验证前后端就绪探针 (/api/ready)"
   for _ in $(seq 1 20); do
     if curl -fsS "http://127.0.0.1:${WEB_PORT}/api/ready" >/dev/null 2>&1 \
       && curl -fsS "http://127.0.0.1:${ADMIN_PORT}/api/ready" >/dev/null 2>&1; then
