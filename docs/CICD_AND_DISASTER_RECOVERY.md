@@ -33,6 +33,8 @@
 | `server/apps/monitor/services/resilience.py` | 零额外依赖的 Redis / 进程内存双通道限流器与上报队列 + 200ms 超时熔断器 |
 | `server/apps/monitor/management/commands/run_ingest_worker.py` | 异步消费 Redis 队列并批量写入 PostgreSQL 的后台 Worker 命令 |
 | `sdk/src/transport.ts` | 浏览器端监控 SDK 批量缓冲队列（最多 200 条）+ `5xx/429` 指数退避与随机抖动重试 |
+| `stress-test/` | 独立全栈压力测试模块（支持 `smoke` / `l1-baseline` / `l2-growth` / `l3-burst` / `spike` 五档压测与 HTML/MD/JSON 报告输出） |
+| `docs/STRESS_TEST_REPORT.md` | 本地开发环境与测试网关环境（Nginx 1.28 + Gunicorn + PostgreSQL 16 + Chrome 156 CDP）全链路压测对比报告 |
 
 ---
 

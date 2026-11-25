@@ -1,0 +1,42 @@
+{
+  "name": "drone-website-stress-test",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AeroApex 前后端全链路压力测试模块：前端静态资源吞吐、真实浏览器渲染与交互压测、监控 SDK 高频上报压测、后端 API 全链路压测与可视化报告生成。",
+  "type": "module",
+  "bin": {
+    "drone-stress": "./dist/cli.js"
+  },
+  "scripts": {
+    "preflight": "npm run build --silent && node dist/cli.js --env local --check-only",
+    "preflight:staging": "npm run build --silent && node dist/cli.js --env staging --check-only",
+    "stress": "npm run build --silent && node dist/cli.js --env local",
+    "stress:staging": "npm run build --silent && node dist/cli.js --env staging",
+    "stress:capacity": "npm run build --silent && node dist/cli.js --env staging --capacity",
+    "stress:smoke": "npm run build --silent && node dist/cli.js --profile smoke",
+    "stress:frontend": "npm run build --silent && node dist/cli.js --suite frontend",
+    "stress:backend": "npm run build --silent && node dist/cli.js --suite backend",
+    "stress:browser": "npm run build --silent && node dist/cli.js --suite browser",
+    "stress:sdk": "npm run build --silent && node dist/cli.js --suite sdk",
+    "build": "tsup",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.15.21",
+    "eslint": "^9.39.4",
+    "jsdom": "^26.1.0",
+    "prettier": "^3.8.3",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.60.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}

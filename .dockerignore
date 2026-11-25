@@ -2,13 +2,17 @@
 web/node_modules
 admin/node_modules
 sdk/node_modules
+stress-test/node_modules
 server/.venv
 web/dist
 admin/dist
 sdk/dist
+stress-test/dist
+stress-test/reports
 web/coverage
 admin/coverage
 sdk/coverage
+stress-test/coverage
 **/.env
 **/.env.*
 !**/.env.example

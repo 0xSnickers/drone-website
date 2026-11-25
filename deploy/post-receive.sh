@@ -63,6 +63,9 @@ EOF
     (cd "$WORK_DIR/admin" && npx vitest run --config "${BASE_DIR}/sdk-vitest.mjs")
     rm -f "${BASE_DIR}/sdk-vitest.mjs"
   fi
+  if [ -d "$WORK_DIR/stress-test" ]; then
+    (cd "$WORK_DIR/stress-test" && ([ -d node_modules ] || npm ci) && npm run check)
+  fi
 
   echo "===> [3/5] 执行数据库迁移并原子切换前端静态产物"
   (cd "$WORK_DIR/server" && .venv/bin/python manage.py migrate --noinput)
@@ -215,6 +218,9 @@ echo "===> [2/5] 容器化 CI 门禁检查（失败即中止，不影响线上�
 docker run --rm -v "$WORK_DIR":/src -w /src/sdk   node:26-slim sh -c "npm ci && npm run check"
 docker run --rm -v "$WORK_DIR":/src -w /src/web   node:26-slim sh -c "npm ci && npm run check"
 docker run --rm -v "$WORK_DIR":/src -w /src/admin node:26-slim sh -c "npm ci && npm run check"
+if [ -d "$WORK_DIR/stress-test" ]; then
+  docker run --rm -v "$WORK_DIR":/src -w /src/stress-test node:26-slim sh -c "npm ci && npm run check"
+fi
 docker run --rm -v "$WORK_DIR":/src -w /src/server python:3.12-slim sh -c \
   "pip install -q uv && uv sync --frozen && ./scripts/test.sh"
 
