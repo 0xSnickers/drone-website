@@ -5,7 +5,6 @@ packages, while setting REDIS_URL enables distributed rate limiting and async qu
 with automatic 200ms circuit-breaker degradation back to local memory / sampled DB writes.
 """
 
-import json
 import logging
 import random
 import socket
@@ -193,37 +192,6 @@ def check_rate_limit_resilient(ip: str) -> bool:
     return check_local_rate_limit(ip, limit)
 
 
-def enqueue_ingest_job(queue_key: str, job: dict) -> bool:
-    """Push validated ingest batch to Redis queue when INGEST_MODE=redis_queue."""
-    mode = getattr(settings, "INGEST_MODE", "direct")
-    if mode != "redis_queue" or not getattr(settings, "REDIS_URL", "").strip():
-        return False
-    if is_circuit_open():
-        return False
-
-    max_len = getattr(settings, "INGEST_QUEUE_MAXLEN", 50_000)
-    serialized = json.dumps(job, ensure_ascii=False)
-    try:
-        length, _ = execute_redis_commands(
-            [["RPUSH", queue_key, serialized], ["LTRIM", queue_key, str(-max_len), "-1"]]
-        )
-        return int(length) >= 1
-    except Exception as exc:
-        _trip_circuit(exc)
-        return False
-
-
-def requeue_ingest_jobs(queue_key: str, jobs: list[dict]) -> None:
-    """Push unpersisted jobs back to the head of Redis queue if DB write fails."""
-    if not jobs:
-        return
-    cmds = [["LPUSH", queue_key, json.dumps(job, ensure_ascii=False)] for job in reversed(jobs)]
-    try:
-        execute_redis_commands(cmds, timeout_sec=2.0)
-    except Exception as exc:
-        logger.error("Failed to requeue %d jobs back to %s: %s", len(jobs), queue_key, exc)
-
-
 def filter_degraded_events(raw_events: list[dict]) -> list[dict]:
     """When Redis queue degrades to direct DB writes, keep 100% errors and sample others."""
     if not is_circuit_open() or getattr(settings, "INGEST_MODE", "direct") != "redis_queue":
@@ -235,20 +203,3 @@ def filter_degraded_events(raw_events: list[dict]) -> list[dict]:
         if item.get("type") == "error" or random.random() < sample_rate:
             kept.append(item)
     return kept
-
-
-def pop_ingest_jobs(queue_key: str, batch_size: int = 50) -> list[dict]:
-    """Pop up to batch_size queued jobs from Redis (used by run_ingest_worker)."""
-    cmds = [["LPOP", queue_key] for _ in range(max(1, batch_size))]
-    results = execute_redis_commands(cmds, timeout_sec=2.0)
-    jobs: list[dict] = []
-    for raw in results:
-        if not raw:
-            continue
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                jobs.append(parsed)
-        except json.JSONDecodeError:
-            logger.warning("Dropped malformed queued payload from %s", queue_key)
-    return jobs

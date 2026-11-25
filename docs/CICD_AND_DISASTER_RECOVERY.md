@@ -1,321 +1,170 @@
-# AeroApex (`drone-website`) CI/CD、容量演进与容灾架构指南
+# 部署、容量演进与容灾指南
 
-本文档汇总本项目的 **自建 Git 自动化 CI/CD 方案**、**四阶段用户激增扩容路线（L1~L4）**、**容灾与高可用架构设计**、**四大故障场景具体走向流程** 以及 **生产运维操作手册（SOP）**。
+更新日期：2026-11-25（Asia/Shanghai）。本文说明当前仓库实现、部署条件与后续规划；本轮优化尚未发布到生产，不能据此推断现有服务器已经采用下述配置。
 
----
+总体设计见[当前方案](CURRENT_SOLUTION.md)，完成状态与验证证据见[开发进度](DEVELOPMENT_PROGRESS.md)，旧压测数值见[历史压测报告](STRESS_TEST_REPORT.md)。
 
-## 目录
+## 1. 文件与能力入口
 
-1. [仓库与生产部署文件索引](#1-仓库与生产部署文件索引)
-2. [CI/CD 自动化发布方案（基于 Git 裸仓库 + Docker）](#2-cicd-自动化发布方案基于-git-裸仓库--docker)
-3. [用户量激增：四阶段容量规划与集群分水岭](#3-用户量激增四阶段容量规划与集群分水岭)
-4. [容灾与高可用架构设计](#4-容灾与高可用架构设计)
-5. [四大故障场景：容灾具体走向流程图](#5-四大故障场景容灾具体走向流程图)
-6. [已落地的代码级容灾与平滑扩容机制](#6-已落地的代码级容灾与平滑扩容机制)
-7. [生产部署、一键升档与灾难恢复操作手册](#7-生产部署一键升档与灾难恢复操作手册)
+- [Git 发布钩子](../deploy/post-receive.sh)：监听 main 推送、串行发布、固定本次 SHA，按 local / Docker 分支执行。
+- [local 发布脚本](../deploy/local-release.sh)：独立源码目录、锁文件安装、五模块检查、候选端口、Nginx 切换与失败回滚。
+- [生产 Compose](../docker-compose.prod.yml)：PostgreSQL、server、web、admin；可选 Redis 与 worker。
+- [生产环境示例](../deploy/.env.prod.example)：数据库、鉴权、可信代理、队列与构建参数，部署前必须替换示例值。
+- [宿主机 Nginx 示例](../deploy/host-nginx.conf)：域名代理、覆盖外来 XFF、认证 / 上报限流。
+- [SPA 容器 Nginx](../deploy/spa-nginx.conf)：静态资源缓存、SPA 路由回退与静态站探针。
+- [server 容器入口](../server/scripts/entrypoint.sh)：web / migrate / worker 三种角色。
+- [队列实现](../server/apps/monitor/services/queue.py)：Streams 消费组、背压、旧 List 迁移。
+- [限流与熔断](../server/apps/monitor/services/resilience.py)：RESP2 客户端、本地与 Redis 限流、采样降级。
+- [备份脚本](../deploy/backup-postgres.sh)：PostgreSQL 导出、压缩加密、可选异地复制与恢复入口。
+- [GitHub Actions](../.github/workflows/ci-cd.yml)：五模块检查、数据库与队列集成任务、镜像发布、可选 SSH 部署。
 
----
+## 2. 两种发布方式
 
-## 1. 仓库与生产部署文件索引
+### 2.1 local：独立版本目录与网关切换
 
-| 文件路径 | 作用说明 |
-| --- | --- |
-| `.github/workflows/ci-cd.yml` | GitHub Actions 全自动 CI/CD：4 端并行检查 + Postgres 16 / Redis 7 真库契约集成测试 + 自动构建推送 `ghcr.io` 三端镜像 + 可选 SSH 远程自动上线 |
-| `docker-compose.prod.yml` | 生产容器编排：默认启动单机容灾基线（`postgres` + `server` + `web` + `admin`）；加 `--profile ha` 一键拉起 `redis` + `worker` 异步消费队列 |
-| `deploy/web.Dockerfile` | 前台官网多阶段构建（Node 26 构建静态资源 -> Nginx 1.28 Alpine 托管） |
-| `deploy/admin.Dockerfile` | 管理后台多阶段构建（以仓库根目录为上下文，包含 `../sdk` 源码别名依赖） |
-| `deploy/spa-nginx.conf` | 前端容器内 Nginx 配置（SPA 路由回退、`gzip`、静态产物强缓存与 `/healthz` 探针） |
-| `deploy/host-nginx.conf` | 宿主机 Nginx 1.28 反向代理、域名分流、`upstream` 故障摘流与网关层 `limit_req` 限流 |
-| `deploy/post-receive.sh` | Git 裸仓库 `hooks/post-receive` 自动 CI/CD 脚本（`flock` 防并发 + 容器化 4 端检查 + 独立 `migrate` + 滚动发布 + `/api/ready` 验收） |
-| `deploy/backup-postgres.sh` | PostgreSQL 定时导出、`AES-256` 加密、异地对象存储同步与 `--restore` 一键恢复脚本 |
-| `deploy/.env.prod.example` | 生产环境变量模板（含单机基线与 HA 双通道切换注释） |
-| `server/scripts/entrypoint.sh` | 后端容器多角色入口（支持 `web`、`migrate`、`worker` 三种运行模式与 Gunicorn 优雅停机） |
-| `server/apps/monitor/services/resilience.py` | 零额外依赖的 Redis / 进程内存双通道限流器与上报队列 + 200ms 超时熔断器 |
-| `server/apps/monitor/management/commands/run_ingest_worker.py` | 异步消费 Redis 队列并批量写入 PostgreSQL 的后台 Worker 命令 |
-| `sdk/src/transport.ts` | 浏览器端监控 SDK 批量缓冲队列（最多 200 条）+ `5xx/429` 指数退避与随机抖动重试 |
-| `stress-test/` | 独立全栈压力测试模块（支持 `smoke` / `l1-baseline` / `l2-growth` / `l3-burst` / `spike` 五档压测与 HTML/MD/JSON 报告输出） |
-| `docs/STRESS_TEST_REPORT.md` | 本地开发环境与测试网关环境（Nginx 1.28 + Gunicorn + PostgreSQL 16 + Chrome 156 CDP）全链路压测对比报告 |
+设置 `DEPLOY_MODE=local` 后，post-receive 使用收到的完整提交 SHA，将源码归档至 `sources/<SHA>/release-<发布 ID>`。即使重复发布同一提交，也创建新目录，避免重新安装依赖或构建时改动在线目录。
 
----
+发布顺序：
 
-## 2. CI/CD 自动化发布方案（基于 Git 裸仓库 + Docker）
+1. 使用部署锁串行执行，以本次 SHA 创建独立源码目录。
+2. 在目录内执行 `uv sync --frozen`，对 sdk、web、admin、stress-test 执行 `npm ci`，完成五模块检查。
+3. 执行数据库迁移，在备用端口启动候选 Gunicorn；原服务保持运行。
+4. 候选 `/api/ready` 通过后，复制新的哈希资源到共享资产目录并生成候选 Nginx 配置。
+5. `nginx -t` 通过后重新加载网关，切换两个前端根目录及 API upstream。
+6. 验证两个网关的 readiness 与 `/__release` 版本标记，记录 active 状态，再优雅终止旧 Gunicorn。
 
-针对 Ubuntu 服务器宿主机环境（无论宿主机自身 Node/Python 版本如何），将 `sdk`、`web`、`admin`、`server` 四端 CI 门禁全部放在标准版本的临时 Docker 容器中执行，宿主机仅承担 **Git 仓库托管 + Docker Compose 编排 + Nginx 反向代理**。
+失败处理：
 
-### 2.1 发布流水线流程图
+- 检查、迁移、候选启动或候选 readiness 失败时，不进入网关切换。
+- 已切换后的验收失败，恢复旧配置并核对网关实际返回的旧版本；连续 reload 可能合并信号，不能只根据命令退出码判断回滚成功。
+- 无法确认回滚时保留候选进程并返回失败，需检查网关与进程状态；脚本不在网关可能仍引用候选进程时直接终止它。
+- 回滚应用不会撤销数据库迁移，迁移必须兼容仍在运行的旧版本。
 
-```mermaid
-flowchart LR
-    Dev["开发机执行 git push prod main"] --> Hook["服务器 repo.git 触发 post-receive"]
-    Hook --> Lock["flock 文件锁防止并发发布撞车"]
-    Lock --> Checkout["检出最新代码至 /srv/drone-website/work"]
-    Checkout --> CI["容器内执行 4 端 CI 门禁检查"]
+运行条件：
 
-    subgraph CIGate["CI 门禁 (任一失败立即中止)"]
-        CISdk["sdk: npm ci && npm run check"]
-        CIWeb["web: npm ci && npm run check"]
-        CIAdmin["admin: npm ci && npm run check"]
-        CIServer["server: uv sync --frozen && ./scripts/test.sh"]
-    end
+- 主机需具备 uv、Node/npm、Nginx、curl、Git 和 flock；Node 版本依据根目录 `.nvmrc`。
+- 必须提供显式、持久的 `DATABASE_URL`。生产示例中的 `postgres` 容器服务名适用于 Compose 网络，local 模式需改为宿主机可访问的数据库地址。
+- 预留 `PORT` 与 `PORT+1` 两个 API 候选端口，以及 `WEB_HOST_PORT`、`ADMIN_HOST_PORT` 两个网关端口。脚本未配置时默认基准 API 端口为 19100；示例环境文件中的 `PORT` 会覆盖默认值。
+- Nginx 配置与状态位于部署目录 `run/`；初次部署前避免端口与系统 Nginx 冲突。
+- `run/active-port`、`run/active-source`、`run/active-revision` 记录当前版本，`nginx.previous.conf` 保留上一配置。
+- 旧哈希资源保存在 `assets/web`、`assets/admin`，源码与静态资源暂不自动清理。
 
-    CI --> CIGate
-    CIGate -->|"任一报错"| Abort["非零退出并回传错误日志 (线上旧容器零影响)"]
-    CIGate -->|"全部通过"| Build["注入短 SHA 构建生产镜像"]
-    Build --> Migrate["独立执行一次性迁移: compose run --rm server migrate"]
-    Migrate --> Rollout["滚动更新容器: compose up -d --remove-orphans"]
-    Rollout --> Probe["轮询 GET /api/ready 校验 DB 与进程就绪"]
-    Probe -->|"200 OK"| Done["发布完成"]
-```
+local 发布脚本不启动或切换独立 ingest worker，worker 升级由运维进程管理器单独安排。应用版本目录隔离不等于跨机器高可用。
 
-> 若后续迁移至 GitHub Actions / GitLab CI / Gitea Actions：`docker-compose.prod.yml`、`deploy/*.Dockerfile` 与 `deploy/host-nginx.conf` 完全复用，只需将 `deploy/post-receive.sh` 中的步骤拆分为 CI Runner 构建镜像推送到镜像仓库（GHCR / ACR），再通过 SSH 到目标服务器拉取镜像执行 `migrate` 与 `up -d`。
+### 2.2 Docker：单机编排与容器重建
 
----
+默认 `DEPLOY_MODE=docker`。钩子在固定工作区检出准确 SHA，在临时容器中完成五模块检查，构建生产镜像、独立迁移，然后执行 Compose 更新并检查后端 `/api/ready`。
 
-## 3. 用户量激增：四阶段容量规划与集群分水岭
+当前 Compose 单实例重建不提供 local 的双端口网关切换，也没有失败后自动恢复旧版本的完整流程。前端容器重建后，旧哈希资源保留策略也不同于 local 模式。需要持续可用发布时，应另行实现两组服务与网关切流，不能将当前 `compose up -d` 视为已完成滚动发布。
 
-**核心原则**：部署保持当前阶段所需的最小复杂度，代码提前留好「队列/直写」与「Redis/内存」切换插槽。**DAU 5 万（峰值 QPS 300）是决定是否需要上应用集群的分水岭。**
+Compose 的 `ha` profile 只增加一个 Redis 与一个 worker，仍是单机服务组合；它不包含跨可用区 Redis、数据库副本、SLB 或自动故障切换。
 
-### 3.1 四阶段演进路线图
+### 2.3 GitHub Actions：配置存在，远端状态待验收
 
-```mermaid
-flowchart LR
-    L1["L1 起步期 (DAU < 5k)"] -->|"套 CDN + 关 SELF_LOG_ENABLED + 独立 RDS"| L2["L2 增长期 (DAU 5k ~ 50k)"]
-    L2 -->|"开启 --profile ha 异步削峰 + 多机 SLB"| L3["L3 爆发期 (DAU 50k ~ 500k)"]
-    L3 -->|"K8s HPA 弹性伸缩 + ClickHouse 分流"| L4["L4 高并发 (DAU 500k+)"]
-```
+仓库已配置 sdk、web、admin、server、stress-test 检查，之后执行 PostgreSQL 16 / Redis 7 契约和集成任务；main 推送可继续发布 GHCR 镜像，并在配置 SSH Secrets 时执行远端部署。
 
-### 3.2 容量、硬件配置与集群需求对照表
+当前 SSH 步骤从远端 main 更新源码后在服务器构建 Compose，并非按已发布的镜像摘要切换，也不调用 local 发布脚本。本轮只核验配置与本地测试，没有触发或确认远端流水线。启用前需验收环境文件、目标版本一致性、发布失败处理及回滚流程。
 
-| 阶段 | 用户与流量规模 | 推荐硬件与云资源配置 | 是否需要集群？ | 关键动作（无需重构业务代码） |
-| --- | --- | --- | --- | --- |
-| **L1 起步期** | DAU < 5,000<br>峰值 QPS < 30<br>并发在线 < 300 | `2核 4G` 云服务器 × 1<br>5M 带宽 + 50G SSD | **不需要集群**<br>单机 Docker Compose 即可 | 默认启动 `docker-compose.prod.yml`，配好每日自动加密备份与免费 CDN |
-| **L2 增长期** | DAU 5,000 ~ 50,000<br>峰值 QPS 30 ~ 300<br>并发在线 300 ~ 3,000 | 应用机 `4核 8G` × 1<br>独立云托管 RDS `2核 4G`<br>全站静态资源接入 CDN | **不需要应用集群**<br>CDN 卸掉 90%+ 流量 + 数据库独立 | 1. 静态资源全走 CDN<br>2. `.env.prod` 设 `SELF_LOG_ENABLED=false`、`GUNICORN_WORKERS=4~8`<br>3. `DATABASE_URL` 指向托管高可用 RDS |
-| **L3 爆发期** | DAU 50,000 ~ 500,000<br>峰值 QPS 300 ~ 3,000<br>并发在线 3,000 ~ 30,000 | SLB 负载均衡 + 应用机 `4核 8G` × 2~4 台<br>托管 Redis `4G`<br>高可用 RDS `8核 16G` + PgBouncer | **需要应用层集群**<br>+ 独立高可用 Redis / RDS | 1. 配置 `REDIS_URL` 与 `INGEST_MODE=redis_queue`，启动 `worker` 批量落库<br>2. SLB 后挂载多台无状态 `server` 节点<br>3. 监控明细表按月分区并定期归档 |
-| **L4 高并发** | DAU 500,000+<br>峰值 QPS 3,000+<br>监控上报千万级/天 | K8s 节点池（`8核 16G` × N）<br>Redis Cluster / Kafka<br>PG 主从读写分离 + ClickHouse | **需要全链路高可用集群**<br>自动弹性扩缩容（HPA） | K8s 按 CPU/QPS 自动扩缩 Pod；海量监控明细由消费组写入 ClickHouse，与核心业务 PG 彻底物理隔离 |
+## 3. 容量演进：按测量结果升级
 
----
+保留 L1～L4 的阶段名称作为规划与压测预设的组织方式。预设中的 DAU / QPS 标签是场景假设，不是当前代码或某台硬件的容量保证；不按固定 DAU 数字自动决定是否集群化。
 
-## 4. 容灾与高可用架构设计
+### L1：单机基线
 
-### 4.1 三层隔离设计原则
+使用 PostgreSQL、应用服务与静态站托管，建立备份和资源监测。先验证业务成功率、拒绝率、查询 P95、数据库连接与磁盘增长，再评估单机余量。SQLite 可用于开发和部分回归，不能用其测试结果替代 PostgreSQL 并发写入验证。
 
-1. **前后端故障隔离**：前台展示站 `web/` 为纯静态 SPA，前置 CDN（开启离线兜底 `Always Online`）。即使源站后端与数据库全部宕机，全球访客仍可正常浏览无人机产品官网。
-2. **核心业务与监控流量隔离**：登录鉴权、用户与项目管理走核心直连路径；高频监控上报（`/api/v1/ingest/*`）支持队列缓冲与故障采样降级；探针 `/api/ready` **仅检测主数据库连通性**，绝不因 Redis 抖动引发全站摘流雪崩。
-3. **无状态计算与数据多副本隔离**：`server` 采用 JWT + 数据库存储 `RefreshToken` 哈希，进程自身无会话状态，任意节点宕机可秒级切流；数据层通过「热备流复制 + 异地加密定时备份」守住数据底线。
+### L2：卸载静态与数据库压力
 
-### 4.2 目标容灾架构全景图
+当测量显示带宽、静态资源或数据库争用成为瓶颈时，再引入 CDN、独立数据库或调整进程数。CDN 缓存、失效和源站故障兜底需要单独部署与验收。
 
-```mermaid
-flowchart TB
-    subgraph Client["客户端层"]
-        BrowserWeb["访客浏览器 (web 官网)"]
-        BrowserAdmin["管理员浏览器 (admin 后台)"]
-        SDK["monitor-sdk (本地 200 条缓冲 + 指数退避抖动)"]
-    end
+### L3：异步削峰与多实例
 
-    subgraph Edge["边缘容灾层 (CDN + WAF)"]
-        CDN["CDN 边缘缓存 (Always Online 离线兜底)"]
-    end
+当同步写入影响接口延迟，且 worker 落库能力能够覆盖持续事件量时，启用 Redis Streams 与独立 worker。多应用实例还需负载均衡、可信代理、数据库连接预算和共享限流。队列只能吸收短时差额，不能替代持续写入能力。
 
-    subgraph Gateway["接入与流量调度层"]
-        LB["SLB / 宿主机 Nginx (limit_req 限流 + upstream 故障摘除)"]
-    end
+### L4：分析存储与跨区能力
 
-    subgraph AppCluster["无状态应用层"]
-        ServerA["Server 实例 A (AZ-1) - Gunicorn 优雅停机"]
-        ServerB["Server 实例 B (AZ-2) - Gunicorn 优雅停机"]
-        Worker["Ingest Worker - 异步批量 bulk_create"]
-    end
+只有在明细规模、分析查询或恢复目标要求明确后，再评估分区、增量聚合、分析数据库、跨区副本和弹性编排。ClickHouse、Kafka、Kubernetes、托管高可用 RDS 等尚未作为当前仓库的已部署能力交付。
 
-    subgraph Buffer["缓冲与状态共享层 (带自动熔断)"]
-        Redis["Redis (分布式限流 + Ingest 缓冲队列)"]
-        LocalFallback["进程内降级通道 (内存限流 + 保错采样直写)"]
-    end
+容量验证必须分开记录总 RPS、成功 RPS、429 拒绝率、异步落库吞吐与延迟；CPU / 内存需注明来自压测机还是被测服务。当前工具的成功吞吐与拒绝率门禁见[当前方案](CURRENT_SOLUTION.md)。
 
-    subgraph DataLayer["数据持久与异地灾备层"]
-        PGPrimary["PostgreSQL 主库 (AZ-1)"]
-        PGStandby["PostgreSQL 热备库 (AZ-2)"]
-        OffsiteBackup["异地对象存储 S3 / OSS (AES-256 加密 pg_dump)"]
-    end
+## 4. 故障处理边界
 
-    BrowserWeb --> CDN
-    BrowserAdmin --> CDN
-    CDN -->|"/api/* 动态流量"| LB
-    SDK -->|"POST /api/v1/ingest/*"| LB
+### 应用或容器故障
 
-    LB -->|"GET /api/ready"| ServerA
-    LB -->|"GET /api/ready"| ServerB
+Compose 配置了 `restart: unless-stopped`，Nginx upstream 提供被动故障处理配置。单个服务实例退出时仍可能出现访问中断；当前没有完成跨机切换演练，不能承诺固定 RTO 或会话零中断。
 
-    ServerA -->|"正常态"| Redis
-    ServerB -->|"正常态"| Redis
-    Redis -->|"LPOP 批量消费"| Worker
+### Redis 故障或队列满载
 
-    ServerA -.->|"超时 > 200ms 熔断 30s"| LocalFallback
-    ServerB -.->|"超时 > 200ms 熔断 30s"| LocalFallback
+Redis 操作超时或失败时，当前应用进程熔断 30 秒，限流回落本地内存。异步事件接收保留原有有损采样直写策略；异常全量尝试写入，其他事件按配置采样，日志直写数据库。
 
-    ServerA -->|"核心读写 (5s 连接超时保护)"| PGPrimary
-    ServerB -->|"核心读写 (5s 连接超时保护)"| PGPrimary
-    Worker -->|"批量落库"| PGPrimary
-    LocalFallback -.->|"100% 错误 + 采样行为直写"| PGPrimary
+队列达到配置容量时返回 429，不删除已接收任务。Redis 应使用 `noeviction`；AOF 与基础设施决定已接收任务的持久性。本地降级限流不是多进程、跨机器的统一限额。
 
-    PGPrimary ==>|"流复制同步"| PGStandby
-    PGStandby -->|"每日加密备份"| OffsiteBackup
-```
+### 数据库故障
 
----
+`/api/ready` 执行数据库 `SELECT 1`，不可达返回 503 `NOT_READY`；它不检查 Redis，以免队列抖动直接影响数据库就绪判断。其他业务接口的数据库异常不能一概当作 503，未处理错误可能返回 500。
 
-## 5. 四大故障场景：容灾具体走向流程图
+worker 领取后的任务在提交前保留，提交与收据为同一事务；超时重领后按收据去重。接收入口仍需查项目与黑名单，因此 Redis 正常也不代表数据库完全故障时可以持续接收所有上报。客户端缓冲与重试有容量和时间限制。
 
-### 5.1 场景一：单台应用节点 / 容器崩溃（RTO < 5 秒，RPO = 0）
+### 整机或区域故障
 
-```mermaid
-flowchart LR
-    Crash["Server-A 容器崩溃或机器断电"] --> Probe["Nginx / SLB 探测失败 (max_fails=2)"]
-    Probe --> Reroute["5 秒内自动摘除 Server-A, 100% 流量切至 Server-B"]
-    Reroute --> Seamless["JWT 无状态验签, 在线管理员零掉线"]
-    Crash --> Heal["Docker restart: unless-stopped 自动拉起新容器"]
-    Heal --> Back["通过 /api/ready 检查后自动恢复承载流量"]
-```
+当前仓库提供部署和备份脚本，尚未交付跨区流量调度、数据库自动升主或已验证的 CDN 离线服务。RTO / RPO 需要依据真实备份频率、恢复演练、DNS / 网关切换和数据副本策略测量；本文不列未经演练的秒级或零损失承诺。
 
-### 5.2 场景二：Redis 队列或缓存故障（RTO < 1 秒，自动熔断降级）
+## 5. 第一批优化的升级要求
 
-```mermaid
-flowchart TD
-    Incoming["请求进入 Server"] --> TryRedis{"连接 Redis <= 200ms?"}
-    TryRedis -->|"正常"| UseRedis["Redis 分布式限流 + RPUSH 入队返回 200"]
-    TryRedis -->|"超时或拒绝连接"| Trip["打开进程内 30 秒熔断器 (is_circuit_open=True)"]
-    Trip --> MemLimit["限流自动回退本地内存窗口 (上限 10,000 IP 防 OOM)"]
-    MemLimit --> RouteType{"接口类型?"}
-    RouteType -->|"登录 / 用户 / 项目 / 看板查询"| NormalDB["直连 PostgreSQL 正常响应 (核心功能 0 中断)"]
-    RouteType -->|"监控上报 /api/v1/ingest/events"| DegradeWrite["Error 事件 100% 直写 DB, 其余事件按 20% 采样直写保护主库"]
-```
+1. 发布完整版本，包含新增脚本和迁移，不只复制既有文件的 diff。
+2. 备份目标数据库，执行 `users/0002_alter_user_role`、`auth/0002_refreshtoken_audience` 与 `monitor/0003_ingestreceipt`；确认管理员和只读监控账号角色。
+3. 按实际网络配置 `TRUSTED_PROXY_CIDRS`。默认仅信任回环；容器、负载均衡器通常需要不同配置。边缘网关应覆盖外来 XFF。
+4. 升级队列时先停止旧 List worker，再部署新代码、执行迁移并启动新 worker。新消费者分批迁移旧队列；混跑旧 worker 会继续存在旧消费方式的风险。
+5. 设置 `INGEST_VISIBILITY_TIMEOUT_MS` 高于最长单批事务耗时，检查 Redis 空间、AOF、`noeviction` 与积压深度。
+6. 根据 local / Docker 的不同能力安排发布和回滚；验收两端页面、角色限制、API、上报入队与实际落库。
 
-### 5.3 场景三：数据库主节点故障（RTO 15~30 秒，客户端缓冲闭环）
+验收完成后记录版本、迁移、配置和环境，再更新[开发进度](DEVELOPMENT_PROGRESS.md)中的部署状态。当前没有本轮生产发布记录。
 
-```mermaid
-sequenceDiagram
-    participant SDK as 浏览器 monitor-sdk
-    participant LB as SLB / Nginx
-    participant App as Django Server
-    participant DB1 as PG 主库 (AZ-1)
-    participant DB2 as PG 热备库 (AZ-2)
+## 6. 运维操作入口
 
-    Note over DB1: 主节点硬件故障失联
-    SDK->>LB: POST /api/v1/ingest/events
-    LB->>App: 转发上报
-    App->>DB1: 5s connect_timeout 快速失败
-    App-->>SDK: 503 NOT_READY
-    Note over SDK: transport.ts 捕获 503 放回队列 (上限 200 条) 并进入指数退避 + 随机抖动
+以下命令用于准备或操作目标环境，本文档整理没有执行它们。
 
-    Note over DB1,DB2: 高可用 RDS 15~30s 内将备库提升为主库并切换 VIP
-    DB2->>DB2: 升主完成
+### 6.1 安装 Git 发布钩子
 
-    App->>DB2: 自动建立新连接, /api/ready 恢复 200
-    SDK->>LB: 退避到期自动重发积压队列
-    LB->>App: 转发请求
-    App->>DB2: 批量落库成功
-    App-->>SDK: 200 OK (故障窗口期数据不丢失, 且无惊群冲击)
-```
+从项目根目录准备部署目录、私有环境文件与 Git 裸仓库，再将 `deploy/post-receive.sh` 安装到裸仓库的 `hooks/post-receive` 并赋予执行权限。
 
-### 5.4 场景四：源站机房级断网 / 毁灭性灾难（官网 RTO = 0，后台异地恢复 < 30 分钟）
+默认部署根目录位于裸仓库旁，也可通过 `DRONE_DEPLOY_BASE` 显式指定；生产配置位于该目录 `.env.prod`。选择 local 时设置 `DEPLOY_MODE=local`，并按 2.1 节提供宿主机数据库地址与工具链。选择 Docker 时使用宿主机网关配置与容器服务网络。
 
-```mermaid
-flowchart LR
-    Outage["源站机房整体不可达"] --> WebPath["官网流量走向"]
-    Outage --> AdminPath["后台与数据异地重建走向"]
+### 6.2 Compose 迁移与启动
 
-    WebPath --> EdgeCache["CDN Always Online 直接返回边缘缓存页面"]
-    EdgeCache --> KeepAlive["访客正常浏览无人机官网 (RTO = 0)"]
-
-    AdminPath --> Provision["在备用区域新服务器拉取仓库代码与镜像"]
-    Provision --> RestoreDB["运行 backup-postgres.sh --restore 解密恢复最新异地备份"]
-    RestoreDB --> StartStack["docker compose -f docker-compose.prod.yml up -d"]
-    StartStack --> CutDNS["切换 DNS 解析至新服务器 IP, 业务完整恢复"]
-```
-
-### 5.5 容灾等级 SLA（RTO / RPO）对照
-
-| 部署档位 | 官网 `web` RTO | 后台与接口 `server` RTO | 数据恢复点目标 (RPO) |
-| --- | --- | --- | --- |
-| **档位 1：单机容灾基线**（CDN + 单机 Compose 自愈 + 每日异地加密备份） | **0 秒**（CDN 兜底） | 容器崩溃 **< 5 秒**；整机损毁异地重建 **< 30 分钟** | 整机硬盘损毁最多丢失最近一次备份后的数据（按定时周期 **1~24 小时**） |
-| **档位 2：双活高可用集群**（CDN + SLB + 双机跨可用区 + Redis + 主备高可用 RDS） | **0 秒**（CDN 兜底） | 单机宕机 **< 5 秒**；主库切换 **15~30 秒** | **RPO ≈ 0**（主备实时流复制 + 云 RDS 按秒时间点回档 PITR） |
-
----
-
-## 6. 已落地的代码级容灾与平滑扩容机制
-
-1. **可插拔限流与异步队列 + 熔断降级（`server/apps/monitor/services/resilience.py`）**
-   - 内置纯 Python 标准库 `socket` 的轻量级 RESP2 客户端，**无需额外安装第三方依赖包**即可对接生产 `Redis 6/7`。
-   - 未配置 `REDIS_URL` 时，自动走进程内限流（带 `10,000` IP 容量上限防内存泄漏）与同步批量写库。
-   - 配置 `REDIS_URL` 与 `INGEST_MODE=redis_queue` 后，监控上报写入 Redis 队列立即返回，由 `python manage.py run_ingest_worker` 批量消费落库；若消费期间遇数据库主备切换异常，未落库批次会自动 `LPUSH` 回塞队首，保证故障窗口期队列零丢数。
-   - 本地限流窗口与熔断状态由线程锁保护，在 Gunicorn 多线程（`gthread`）并发下安全淘汰超限 IP。
-   - 当 Redis 响应超过 `REDIS_TIMEOUT_MS`（默认 `200ms`）或断连时，自动开启 **30 秒熔断器**，无缝切回本地内存限流与保护性采样直写（`error` 事件 100% 保留，其余行为事件按 `INGEST_FALLBACK_SAMPLE_RATE=0.2` 采样）。
-2. **数据库快速失败保护（`server/config/settings.py`）**
-   - PostgreSQL 引擎下自动注入 `connect_timeout=5`（秒）和 `statement_timeout=10000`（毫秒），防止慢查询或数据库卡死拖垮全部 Gunicorn Worker。
-3. **容器入口解耦与优雅停机（`server/scripts/entrypoint.sh` & `server/Dockerfile`）**
-   - 支持 `web`、`migrate`、`worker` 三种启动角色；生产环境设置 `RUN_MIGRATIONS_ON_START=false` 并在发版阶段独立运行 `migrate`，彻底消除多副本并发迁移锁表竞态。
-   - Gunicorn 支持环境变量动态调整 `GUNICORN_WORKERS`、`GUNICORN_THREADS`、`GUNICORN_TIMEOUT` 与 `GUNICORN_GRACEFUL_TIMEOUT`。
-4. **前端 SDK 指数退避 + 随机抖动（`sdk/src/transport.ts`）**
-   - `computeBackoffMs` 在遇到网络错误、`429` 或 `5xx` 时按 `base * 2^(failures - 1) + random(0..1000ms)` 退避（封顶 `60s`），服务恢复后自动清零计数并补发本地队列，防止故障恢复瞬间出现客户端重试风暴。
-
----
-
-## 7. 生产部署、一键升档与灾难恢复操作手册
-
-### 7.1 首次在当前 Ubuntu 服务器搭建 Git 自动发布
+在已审查的目标项目目录中，显式传入环境文件；`--env-file` 供 Compose 插值，`PROD_ENV_FILE` 指定服务的运行时环境文件：
 
 ```bash
-# 1. 创建部署目录与 Git 裸仓库
-sudo mkdir -p /srv/drone-website/work /srv/drone-website/backups
-sudo chown -R "$USER":"$USER" /srv/drone-website
-git init --bare /srv/drone-website/repo.git
+export PROD_ENV_FILE=/srv/drone-website/.env.prod
 
-# 2. 准备生产环境变量（修改密码与密钥）
-cp deploy/.env.prod.example /srv/drone-website/.env.prod
-chmod 600 /srv/drone-website/.env.prod
-
-# 3. 安装 Git 自动 CI/CD 钩子
-cp deploy/post-receive.sh /srv/drone-website/repo.git/hooks/post-receive
-chmod +x /srv/drone-website/repo.git/hooks/post-receive
-
-# 4. 配置宿主机 Nginx 1.28 反向代理
-sudo cp deploy/host-nginx.conf /etc/nginx/sites-available/drone-website.conf
-sudo ln -sf /etc/nginx/sites-available/drone-website.conf /etc/nginx/sites-enabled/drone-website.conf
-sudo nginx -t && sudo systemctl reload nginx
-
-# 5. 在开发机添加远程并推送，即可触发全自动 CI 检查与上线
-git remote add prod ssh://<user>@<server-ip>/srv/drone-website/repo.git
-git push prod main
+docker compose --env-file "$PROD_ENV_FILE" -f docker-compose.prod.yml build
+docker compose --env-file "$PROD_ENV_FILE" -f docker-compose.prod.yml up -d postgres
+docker compose --env-file "$PROD_ENV_FILE" -f docker-compose.prod.yml run --rm server migrate
+docker compose --env-file "$PROD_ENV_FILE" -f docker-compose.prod.yml up -d
 ```
 
-### 7.2 流量激增时：一键开启 Redis 异步队列削峰（无需改代码）
+启用异步队列时，先在环境文件中配置 `REDIS_URL=redis://redis:6379/0`、`INGEST_MODE=redis_queue`；按第 5 节完成旧 worker 升级步骤，并在 Compose 命令中启用 `--profile ha`。裸仓库 Docker 钩子还需设置 `ENABLE_HA_PROFILE=true`。local 模式需要独立可访问的 Redis 地址与独立 worker 进程管理。
 
-1. 编辑 `/srv/drone-website/.env.prod`，修改两项配置：
-   ```dotenv
-   REDIS_URL=redis://redis:6379/0
-   INGEST_MODE=redis_queue
-   SELF_LOG_ENABLED=false
-   GUNICORN_WORKERS=8
-   ```
-2. 以 `ha` Profile 启动 `redis` 与 `worker` 并平滑重载 `server`：
-   ```bash
-   cd /srv/drone-website/work
-   PROD_ENV_FILE=/srv/drone-website/.env.prod \
-     docker compose --profile ha -f docker-compose.prod.yml up -d
-   ```
-   （后续在 `post-receive` 中设置 `ENABLE_HA_PROFILE=true` 即可每次推送自动维护 `ha` 编排。）
+这些步骤仍然是单实例更新，未提供 Docker 自动回滚。
 
-### 7.3 配置每日自动加密备份与灾难恢复演练
+### 6.3 备份与恢复
+
+`deploy/backup-postgres.sh` 从 Compose 的 PostgreSQL 导出 SQL，压缩后用 OpenSSL 加密，校验可解密且内容非空，再可选用 rclone 复制到异地。默认清理超过 14 天的本地备份；这不等于清理业务明细表。
+
+调用前由受控环境注入 `BACKUP_PASSPHRASE`，并提供与目标一致的数据库用户、数据库名、Compose 文件和备份目录。调度任务应设置正确工作目录；脚本文件存在不代表已经配置定时或异地备份。
 
 ```bash
-# 1. 赋予备份脚本执行权限
-chmod +x /srv/drone-website/work/deploy/backup-postgres.sh
+cd /srv/drone-website/work
+./deploy/backup-postgres.sh
 
-# 2. 加入每日凌晨 03:00 定时备份（可选配置 RCLONE_REMOTE_DEST 同步到异地 S3/OSS）
-# crontab -e 添加：
-# 0 3 * * * BACKUP_PASSPHRASE='你的高强度加密口令' RCLONE_REMOTE_DEST='oss:drone-backups' /srv/drone-website/work/deploy/backup-postgres.sh >> /srv/drone-website/backup.log 2>&1
-
-# 3. 灾难恢复 / 异地新机器一键还原数据：
-BACKUP_PASSPHRASE='你的高强度加密口令' \
-  ./deploy/backup-postgres.sh --restore /srv/drone-website/backups/pg_drone_website_server_xxx.sql.gz.enc
+# 在已确认的恢复目标或隔离演练环境中执行
+./deploy/backup-postgres.sh --restore /srv/drone-website/backups/pg_backup.sql.gz.enc
 ```
+
+恢复入口会执行备份中的清理与建表语句，需确认目标。解密与非空校验仅验证文件基本可读，恢复耗时、数据完整性与业务可用性需要定期隔离恢复演练；本轮未执行该演练。
+
+## 7. 验证与未完成项
+
+已执行的本地验证包括准确 SHA 与重复发布隔离、真实临时 Nginx / Gunicorn 的切换和失败回滚、PostgreSQL / Redis 的队列恢复与并发收据测试。完整命令与结果见[开发进度](DEVELOPMENT_PROGRESS.md)。
+
+仍待完成：数据保留与收据清理、死信处置、worker 版本编排、发布目录与旧静态资源归档、Docker 持续可用切换、远端 CI/CD 验收、异地恢复演练，以及修正容量口径后的完整复测。

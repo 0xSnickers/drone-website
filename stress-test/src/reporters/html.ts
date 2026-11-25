@@ -26,13 +26,13 @@ function renderTimelineSvg(timeline: TimeSeriesBucket[]): string {
   const maxP95 = Math.max(1, ...timeline.map((b) => b.p95Ms));
 
   const xAt = (idx: number) =>
-    timeline.length === 1
-      ? pad.left + plotW / 2
-      : pad.left + (idx / (timeline.length - 1)) * plotW;
+    timeline.length === 1 ? pad.left + plotW / 2 : pad.left + (idx / (timeline.length - 1)) * plotW;
   const yRps = (val: number) => pad.top + plotH - (val / maxRps) * plotH;
   const yLat = (val: number) => pad.top + plotH - (val / maxP95) * plotH;
 
-  const rpsPoints = timeline.map((b, i) => `${round(xAt(i), 1)},${round(yRps(b.rps), 1)}`).join(' ');
+  const rpsPoints = timeline
+    .map((b, i) => `${round(xAt(i), 1)},${round(yRps(b.rps), 1)}`)
+    .join(' ');
   const p95Points = timeline
     .map((b, i) => `${round(xAt(i), 1)},${round(yLat(b.p95Ms), 1)}`)
     .join(' ');
@@ -67,12 +67,12 @@ function renderHttpCard(r: HttpScenarioResult): string {
     <div class="card-header">
       <div>
         <h3>${esc(r.name)}</h3>
-        <p class="muted">目标: <code>${esc(r.targetUrl)}</code> · 峰值并发 ${r.peakConcurrency} VUs · 持续 ${r.durationSec}s</p>
+        <p class="muted">总 RPS: ${r.rps} · 限流率: ${round(r.rateLimitRate * 100, 2)}% · 目标: <code>${esc(r.targetUrl)}</code> · 峰值并发 ${r.peakConcurrency} VUs · 持续 ${r.durationSec}s</p>
       </div>
       <span class="badge ${badgeCls}">${r.sla.passed ? 'SLA PASS' : 'SLA FAIL'}</span>
     </div>
     <div class="kpi-row">
-      <div class="kpi"><span class="kpi-label">吞吐率 (RPS)</span><strong class="kpi-val">${r.rps}</strong></div>
+      <div class="kpi"><span class="kpi-label">成功吞吐率 (RPS)</span><strong class="kpi-val">${r.successRps}</strong></div>
       <div class="kpi"><span class="kpi-label">总请求 / 成功</span><strong class="kpi-val">${r.totalRequests} / ${r.okRequests}</strong></div>
       <div class="kpi"><span class="kpi-label">429 限流 / 失败</span><strong class="kpi-val">${r.rateLimitedRequests} / ${r.failedRequests}</strong></div>
       <div class="kpi"><span class="kpi-label">TTFB P95</span><strong class="kpi-val">${r.ttfbMs.p95} ms</strong></div>

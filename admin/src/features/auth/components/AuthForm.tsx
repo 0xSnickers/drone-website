@@ -116,15 +116,19 @@ export function AuthForm({ mode }: AuthFormProps) {
         </Button>
       </form>
 
-      <p className="text-sm text-muted-foreground">
-        {t(`auth.${mode}.alternateText`)}{' '}
-        <Link
-          className="font-medium text-primary underline-offset-4 hover:underline"
-          to={alternateHref}
-        >
-          {t(`auth.${mode}.alternateAction`)}
-        </Link>
-      </p>
+      {isRegister ? (
+        <p className="text-sm text-muted-foreground">
+          {t(`auth.${mode}.alternateText`)}{' '}
+          <Link
+            className="font-medium text-primary underline-offset-4 hover:underline"
+            to={alternateHref}
+          >
+            {t(`auth.${mode}.alternateAction`)}
+          </Link>
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t('monitorAccess.inviteOnly')}</p>
+      )}
     </section>
   );
 }

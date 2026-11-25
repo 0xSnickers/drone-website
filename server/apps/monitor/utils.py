@@ -4,6 +4,7 @@ import re
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from ipaddress import ip_address
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -39,11 +40,25 @@ def safe_json_payload(value: object, max_bytes: int = 4096) -> object:
 
 
 def extract_client_ip(request) -> str:
-    if getattr(settings, "TRUST_PROXY", False):
+    remote = request.META.get("REMOTE_ADDR", "127.0.0.1")
+    if not getattr(settings, "TRUST_PROXY", False):
+        return truncate_str(remote, 64)
+    try:
+        peer = ip_address(remote)
+        trusted = getattr(settings, "TRUSTED_PROXY_CIDRS", [])
+        if not any(peer in network for network in trusted):
+            return str(peer)
         forwarded = request.headers.get("X-Forwarded-For", "")
-        if forwarded:
-            return truncate_str(forwarded.split(",")[0].strip(), 64)
-    return truncate_str(request.META.get("REMOTE_ADDR", "127.0.0.1"), 64)
+        if not forwarded or len(forwarded) > 2048:
+            return str(peer)
+        chain = [ip_address(value.strip()) for value in forwarded.split(",")]
+        for candidate in reversed(chain):
+            peer = candidate
+            if not any(peer in network for network in trusted):
+                break
+        return str(peer)
+    except ValueError:
+        return truncate_str(remote, 64)
 
 
 def parse_user_agent(ua: str | None) -> tuple[str, str, str]:
@@ -206,12 +221,8 @@ def iso_utc(dt: datetime | None) -> str:
 
 
 def parse_pagination(params, default_limit: int = 20) -> tuple[int, int]:
-    try:
-        page = max(1, int(params.get("page", 1)))
-    except (TypeError, ValueError):
-        page = 1
-    try:
-        limit = max(1, min(100, int(params.get("limit", default_limit))))
-    except (TypeError, ValueError):
-        limit = default_limit
-    return page, limit
+    from .serializers import MonitorQuerySerializer
+
+    serializer = MonitorQuerySerializer(data={"limit": default_limit, **dict(params.items())})
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data["page"], serializer.validated_data["limit"]

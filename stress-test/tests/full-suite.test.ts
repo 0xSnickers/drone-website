@@ -44,23 +44,23 @@ describe('full-stack stress suite integration against mock AeroApex services', (
 
         if (url === '/api/health') return ok({ status: 'ok' });
         if (url === '/api/ready') return ok({ status: 'ready' });
-        if (url === '/api/v1/auth/login') {
+        if (url === '/api/v1/admin/auth/login') {
           return ok(
             {
               user: { id: 'u1', name: 'Demo', email: 'demo@example.com', role: 'admin' },
               accessToken: 'jwt-stress-test-token',
             },
             200,
-            { 'set-cookie': 'refresh_token=rt_mock_123; Path=/; HttpOnly' },
+            { 'set-cookie': 'admin_refresh_token=rt_mock_123; Path=/; HttpOnly' },
           );
         }
-        if (url === '/api/v1/auth/refresh') {
+        if (url === '/api/v1/admin/auth/refresh') {
           return ok({
             user: { id: 'u1', name: 'Demo', email: 'demo@example.com', role: 'admin' },
             accessToken: 'jwt-stress-test-token',
           });
         }
-        if (url === '/api/v1/auth/me') {
+        if (url === '/api/v1/admin/auth/me') {
           return ok({ id: 'u1', name: 'Demo', email: 'demo@example.com', role: 'admin' });
         }
         if (url.startsWith('/api/v1/projects')) {

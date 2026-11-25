@@ -15,11 +15,24 @@ DEMO_USER = {
     "role": Role.ADMIN,
 }
 
+DEMO_WEB_USER = {
+    "name": "AeroApex Pilot",
+    "email": "pilot@aeroapex.com",
+    "password": "password123",
+    "role": Role.USER,
+}
+
 
 def seed_demo_user() -> None:
     if not User.objects.filter(email=DEMO_USER["email"]).exists():
         create_user(**DEMO_USER)
         logger.info("demo user created: %s", DEMO_USER["email"])
+
+
+def seed_demo_web_user() -> None:
+    if not User.objects.filter(email=DEMO_WEB_USER["email"]).exists():
+        create_user(**DEMO_WEB_USER)
+        logger.info("demo web user created: %s", DEMO_WEB_USER["email"])
 
 
 def seed_demo_user_on_startup() -> None:
@@ -28,5 +41,6 @@ def seed_demo_user_on_startup() -> None:
         return
     try:
         seed_demo_user()
+        seed_demo_web_user()
     except DatabaseError as exc:
         logger.warning("demo user not seeded (run migrations first): %s", exc)

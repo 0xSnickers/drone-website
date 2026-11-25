@@ -47,3 +47,53 @@ def test_me_requires_valid_token(client):
     assert client.get("/api/v1/auth/me").status_code == 401
     res = client.get("/api/v1/auth/me", HTTP_AUTHORIZATION="Bearer nope")
     assert (res.status_code, res.json()["code"]) == (401, "UNAUTHORIZED")
+
+
+def test_admin_and_web_auth_are_isolated(client):
+    from apps.users.seed import DEMO_USER, seed_demo_user
+
+    seed_demo_user()
+    client.post("/api/v1/auth/register", ALICE, format="json")
+
+    # Normal web user cannot log into admin portal
+    denied = client.post(
+        "/api/v1/admin/auth/login",
+        {"email": ALICE["email"], "password": ALICE["password"]},
+        format="json",
+    )
+    assert (denied.status_code, denied.json()["code"]) == (403, "ADMIN_ACCESS_REQUIRED")
+    assert "admin_refresh_token" not in denied.cookies
+
+    # Admin logs into web portal (aud=web) -> cannot access admin portal endpoints
+    web_admin_token, web_res = login(client, DEMO_USER["email"], DEMO_USER["password"])
+    assert web_res.status_code == 200
+    assert "refresh_token" in web_res.cookies
+    wrong_aud = client.get("/api/v1/admin/auth/me", HTTP_AUTHORIZATION=f"Bearer {web_admin_token}")
+    assert (wrong_aud.status_code, wrong_aud.json()["code"]) == (403, "FORBIDDEN")
+    wrong_monitor = client.get("/api/v1/projects", HTTP_AUTHORIZATION=f"Bearer {web_admin_token}")
+    assert (wrong_monitor.status_code, wrong_monitor.json()["code"]) == (403, "FORBIDDEN")
+    wrong_users = client.get("/api/v1/users", HTTP_AUTHORIZATION=f"Bearer {web_admin_token}")
+    assert (wrong_users.status_code, wrong_users.json()["code"]) == (403, "FORBIDDEN")
+
+    # Admin logs into admin portal (aud=admin) -> sets admin_refresh_token independently
+    admin_portal_token, admin_res = login(
+        client, DEMO_USER["email"], DEMO_USER["password"], "/api/v1/admin/auth/login"
+    )
+    assert admin_res.status_code == 200
+    assert "admin_refresh_token" in admin_res.cookies
+    assert (
+        client.get(
+            "/api/v1/admin/auth/me", HTTP_AUTHORIZATION=f"Bearer {admin_portal_token}"
+        ).status_code
+        == 200
+    )
+
+    # Logging out of web does NOT revoke admin refresh session
+    assert client.post("/api/v1/auth/logout").status_code == 200
+    assert client.post("/api/v1/admin/auth/refresh").status_code == 200
+
+    # Logging out of admin revokes admin_refresh_token
+    old_admin_cookie = client.cookies["admin_refresh_token"].value
+    assert client.post("/api/v1/admin/auth/logout").status_code == 200
+    client.cookies["admin_refresh_token"] = old_admin_cookie
+    assert client.post("/api/v1/admin/auth/refresh").status_code == 401

@@ -1,6 +1,7 @@
 """Django settings. All environment-specific values come from env vars (.env supported)."""
 
 import os
+from ipaddress import ip_network
 from pathlib import Path
 
 import dj_database_url
@@ -37,14 +38,22 @@ SEED_DEMO_DATA = env_bool("SEED_DEMO_DATA", DEBUG)
 SELF_LOG_ENABLED = env_bool("SELF_LOG_ENABLED", True)
 SERVICE_NAME = os.getenv("SERVICE_NAME", "drone-website-server")
 TRUST_PROXY = env_bool("TRUST_PROXY", False)
+TRUSTED_PROXY_CIDRS = [
+    ip_network(value) for value in env_list("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
+]
 INGEST_RATE_LIMIT = env_int("INGEST_RATE_LIMIT", 600)
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 REDIS_TIMEOUT_MS = env_int("REDIS_TIMEOUT_MS", 200)
 INGEST_MODE = os.getenv("INGEST_MODE", "direct").strip().lower()
+INGEST_VISIBILITY_TIMEOUT_MS = env_int("INGEST_VISIBILITY_TIMEOUT_MS", 60000)
 INGEST_QUEUE_MAXLEN = env_int("INGEST_QUEUE_MAXLEN", 50000)
 INGEST_FALLBACK_SAMPLE_RATE = float(os.getenv("INGEST_FALLBACK_SAMPLE_RATE", "0.2"))
 DB_CONNECT_TIMEOUT = env_int("DB_CONNECT_TIMEOUT", 5)
 DB_STATEMENT_TIMEOUT_MS = env_int("DB_STATEMENT_TIMEOUT_MS", 10000)
+ANALYTICS_CACHE_TTL_SEC = env_int("ANALYTICS_CACHE_TTL_SEC", 15)
+
+if INGEST_QUEUE_MAXLEN < 1 or INGEST_VISIBILITY_TIMEOUT_MS < 1:
+    raise RuntimeError("INGEST_QUEUE_MAXLEN and INGEST_VISIBILITY_TIMEOUT_MS must be positive")
 
 if INGEST_MODE not in {"direct", "redis_queue"}:
     raise RuntimeError("INGEST_MODE must be 'direct' or 'redis_queue'")
@@ -90,6 +99,10 @@ if "postgresql" in DATABASES["default"].get("ENGINE", ""):
     db_opts.setdefault("connect_timeout", DB_CONNECT_TIMEOUT)
     if DB_STATEMENT_TIMEOUT_MS > 0:
         db_opts.setdefault("options", f"-c statement_timeout={DB_STATEMENT_TIMEOUT_MS}")
+elif "sqlite" in DATABASES["default"].get("ENGINE", ""):
+    db_opts = DATABASES["default"].setdefault("OPTIONS", {})
+    db_opts.setdefault("timeout", 20)
+    db_opts.setdefault("transaction_mode", "IMMEDIATE")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 TIME_ZONE = "UTC"

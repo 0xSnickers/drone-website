@@ -89,10 +89,28 @@ export function buildTimeline(
 }
 
 export function evaluateHttpSla(
-  metrics: { errorRate: number; latencyMs: LatencySummary; rps: number },
+  metrics: {
+    errorRate: number;
+    latencyMs: LatencySummary;
+    rps: number;
+    rateLimitRate?: number;
+    okRequests?: number;
+  },
   sla: SlaThreshold,
 ): SlaEvaluation {
   const checks: SlaEvaluation['checks'] = [
+    {
+      metric: '限流拒绝率',
+      actual: `${round((metrics.rateLimitRate ?? 0) * 100, 2)}%`,
+      target: `<= ${round((sla.maxRateLimitRate ?? 0.01) * 100, 2)}%`,
+      passed: (metrics.rateLimitRate ?? 0) <= (sla.maxRateLimitRate ?? 0.01),
+    },
+    {
+      metric: '有效业务响应',
+      actual: String(metrics.okRequests ?? '未单独统计'),
+      target: '> 0',
+      passed: metrics.okRequests === undefined || metrics.okRequests > 0,
+    },
     {
       metric: '错误率 (Error Rate)',
       actual: `${round(metrics.errorRate * 100, 2)}%`,

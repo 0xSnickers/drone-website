@@ -31,9 +31,33 @@ describe('stats & percentile calculations', () => {
     const t0 = 1_700_000_000_000;
     const buckets = buildTimeline(
       [
-        { timestampMs: t0 + 100, status: 200, ttfbMs: 5, durationMs: 12, bytes: 128, ok: true, rateLimited: false },
-        { timestampMs: t0 + 450, status: 429, ttfbMs: 4, durationMs: 8, bytes: 64, ok: true, rateLimited: true },
-        { timestampMs: t0 + 1200, status: 500, ttfbMs: 9, durationMs: 40, bytes: 80, ok: false, rateLimited: false },
+        {
+          timestampMs: t0 + 100,
+          status: 200,
+          ttfbMs: 5,
+          durationMs: 12,
+          bytes: 128,
+          ok: true,
+          rateLimited: false,
+        },
+        {
+          timestampMs: t0 + 450,
+          status: 429,
+          ttfbMs: 4,
+          durationMs: 8,
+          bytes: 64,
+          ok: true,
+          rateLimited: true,
+        },
+        {
+          timestampMs: t0 + 1200,
+          status: 500,
+          ttfbMs: 9,
+          durationMs: 40,
+          bytes: 80,
+          ok: false,
+          rateLimited: false,
+        },
       ],
       t0,
       2,
@@ -94,7 +118,9 @@ describe('config, presets & HTML asset extraction', () => {
       durationSec: 5,
       browserConcurrency: 4,
     });
-    expect(custom.httpPhases).toEqual([{ name: 'custom-sustain', durationSec: 5, concurrency: 12 }]);
+    expect(custom.httpPhases).toEqual([
+      { name: 'custom-sustain', durationSec: 5, concurrency: 12 },
+    ]);
     expect(custom.browserConcurrency).toBe(4);
   });
 
@@ -118,25 +144,75 @@ describe('config, presets & HTML asset extraction', () => {
   });
 
   it('classifies step health zones and estimates CCU and DAU from step-up metrics', () => {
-    expect(classifyCapacityStep({ errorRate: 0, p95Ms: 220 })).toBe('healthy');
-    expect(classifyCapacityStep({ errorRate: 0.005, p95Ms: 900 })).toBe('degraded');
-    expect(classifyCapacityStep({ errorRate: 0.05, p95Ms: 400 })).toBe('overloaded');
+    expect(
+      classifyCapacityStep({
+        totalRequests: 100,
+        okRequests: 100,
+        rateLimitedRequests: 0,
+        errorRate: 0,
+        p95Ms: 220,
+      }),
+    ).toBe('healthy');
+    expect(
+      classifyCapacityStep({
+        totalRequests: 100,
+        okRequests: 100,
+        rateLimitedRequests: 0,
+        errorRate: 0.005,
+        p95Ms: 900,
+      }),
+    ).toBe('degraded');
+    expect(
+      classifyCapacityStep({
+        totalRequests: 100,
+        okRequests: 100,
+        rateLimitedRequests: 0,
+        errorRate: 0.05,
+        p95Ms: 400,
+      }),
+    ).toBe('overloaded');
 
     const est = estimateUserCapacity([
       {
-        concurrency: 50, rps: 250, totalRequests: 1000, okRequests: 1000, rateLimitedRequests: 0,
-        failedRequests: 0, errorRate: 0, p50Ms: 40, p95Ms: 180, p99Ms: 260,
-        cpuBusyPct: 42, loadAvg1m: 2.8, memUsedGb: 8.5, memTotalGb: 15, zone: 'healthy',
+        concurrency: 50,
+        rps: 250,
+        successRps: 250,
+        totalRequests: 1000,
+        okRequests: 1000,
+        rateLimitedRequests: 0,
+        failedRequests: 0,
+        errorRate: 0,
+        p50Ms: 40,
+        p95Ms: 180,
+        p99Ms: 260,
+        cpuBusyPct: 42,
+        loadAvg1m: 2.8,
+        memUsedGb: 8.5,
+        memTotalGb: 15,
+        zone: 'healthy',
       },
       {
-        concurrency: 200, rps: 380, totalRequests: 1520, okRequests: 1510, rateLimitedRequests: 0,
-        failedRequests: 10, errorRate: 0.006, p50Ms: 210, p95Ms: 980, p99Ms: 1300,
-        cpuBusyPct: 86, loadAvg1m: 6.9, memUsedGb: 9.1, memTotalGb: 15, zone: 'degraded',
+        concurrency: 200,
+        rps: 380,
+        successRps: 377.5,
+        totalRequests: 1520,
+        okRequests: 1510,
+        rateLimitedRequests: 0,
+        failedRequests: 10,
+        errorRate: 0.006,
+        p50Ms: 210,
+        p95Ms: 980,
+        p99Ms: 1300,
+        cpuBusyPct: 86,
+        loadAvg1m: 6.9,
+        memUsedGb: 9.1,
+        memTotalGb: 15,
+        zone: 'degraded',
       },
     ]);
     expect(est.maxHealthyVus).toBe(50);
     expect(est.maxHealthyRps).toBe(250);
-    expect(est.peakUsableRps).toBe(380);
+    expect(est.peakUsableRps).toBe(377.5);
     expect(est.recommendedOnlineUsers).toBe(1200);
     expect(est.recommendedDau).toBe(144000);
   });

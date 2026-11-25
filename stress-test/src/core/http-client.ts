@@ -52,6 +52,7 @@ export class HttpLoadClient {
 
     const headers: Record<string, string> = {
       accept: 'application/json, text/html, */*',
+      'x-stress-run': '1',
       ...spec.headers,
     };
     if (bodyBuffer && !headers['content-length'] && !headers['Content-Length']) {

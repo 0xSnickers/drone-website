@@ -122,9 +122,9 @@ export function buildBackendApiScenarios(
 
     scenarios.push({
       id: 'backend-auth-users',
-      name: '后端鉴权与会话读取链路 (/auth/me · /users · /auth/refresh · /auth/login)',
+      name: '后端鉴权与会话读取链路 (/admin/auth/me · /users · /admin/auth/refresh · /admin/auth/login)',
       category: 'backend-api',
-      targetUrl: `${ctx.config.serverUrl}/api/v1/auth/me`,
+      targetUrl: `${ctx.config.serverUrl}/api/v1/admin/auth/me`,
       phases: profile.httpPhases,
       timeoutMs: profile.timeoutMs,
       sla: profile.sla.backendApi,
@@ -133,7 +133,7 @@ export function buildBackendApiScenarios(
         if (slot === 0) {
           return {
             method: 'POST',
-            url: `${ctx.config.serverUrl}/api/v1/auth/login`,
+            url: `${ctx.config.serverUrl}/api/v1/admin/auth/login`,
             headers: { 'content-type': 'application/json', 'accept-language': 'zh-CN' },
             body: JSON.stringify({
               email: ctx.config.adminEmail,
@@ -145,7 +145,7 @@ export function buildBackendApiScenarios(
         if (slot <= 2 && ctx.refreshCookie) {
           return {
             method: 'POST',
-            url: `${ctx.config.serverUrl}/api/v1/auth/refresh`,
+            url: `${ctx.config.serverUrl}/api/v1/admin/auth/refresh`,
             headers: { cookie: ctx.refreshCookie },
             validateBody: validateApiEnvelope,
           };
@@ -160,7 +160,7 @@ export function buildBackendApiScenarios(
         }
         return {
           method: 'GET',
-          url: `${ctx.config.serverUrl}/api/v1/auth/me`,
+          url: `${ctx.config.serverUrl}/api/v1/admin/auth/me`,
           headers: authHeader,
           validateBody: validateApiEnvelope,
         };
@@ -264,7 +264,7 @@ export function buildMixedRealisticScenario(
         if (ctx.accessToken && iteration % 2 === 0) {
           return {
             method: 'GET',
-            url: `${ctx.config.serverUrl}/api/v1/auth/me`,
+            url: `${ctx.config.serverUrl}/api/v1/admin/auth/me`,
             headers: { authorization: `Bearer ${ctx.accessToken}` },
             validateBody: validateApiEnvelope,
           };

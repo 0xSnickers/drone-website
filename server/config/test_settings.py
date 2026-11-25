@@ -8,6 +8,7 @@ os.environ.update(
     DATABASE_URL="sqlite://:memory:",
     JWT_SECRET="test-secret-test-secret-test-secret-123",
     SEED_DEMO_USER="false",
+    ANALYTICS_CACHE_TTL_SEC="0",
     LOG_LEVEL="WARNING",
     LOG_FILE="",
 )

@@ -3,15 +3,8 @@ import { parseArgs } from 'node:util';
 import { loadStressConfig } from './config/env';
 import { getLoadProfile } from './config/presets';
 import type { BrowserDriverType, ProfileName, SuiteName } from './config/types';
-import {
-  runCapacityBenchmark,
-  saveCapacityReportJson,
-} from './core/capacity';
-import {
-  PreFlightError,
-  prepareRuntimeContext,
-  validatePreFlightContext,
-} from './core/context';
+import { runCapacityBenchmark, saveCapacityReportJson } from './core/capacity';
+import { PreFlightError, prepareRuntimeContext, validatePreFlightContext } from './core/context';
 import { writeStressReports } from './reporters';
 import {
   printFinalSummary,
@@ -147,7 +140,8 @@ async function main(): Promise<void> {
           .map((v) => Number(v.trim()))
           .filter((n) => Number.isFinite(n) && n >= 1)
       : undefined;
-    const mode = config.suite === 'assets' || config.suite === 'frontend' ? 'frontend-only' : 'mixed';
+    const mode =
+      config.suite === 'assets' || config.suite === 'frontend' ? 'frontend-only' : 'mixed';
     console.log(`\n━━━ AeroApex 服务器容量阶梯探顶评估 (${mode}) ━━━`);
     const capReport = await runCapacityBenchmark(config, {
       targetMode: mode,
@@ -156,28 +150,50 @@ async function main(): Promise<void> {
       onStepResult: (s) => {
         const icon = s.zone === 'healthy' ? '🟢' : s.zone === 'degraded' ? '🟡' : '🔴';
         console.log(
-          `  ${icon} [${String(s.concurrency).padStart(3)} VUs] RPS: ${String(s.rps).padStart(7)} | P50: ${s.p50Ms}ms · P95: ${s.p95Ms}ms | Err: ${(s.errorRate * 100).toFixed(2)}% (429:${s.rateLimitedRequests}) | CPU: ${s.cpuBusyPct}% · Load1m: ${s.loadAvg1m} · Mem: ${s.memUsedGb}/${s.memTotalGb}GB`,
+          `  ${icon} [${String(s.concurrency).padStart(3)} VUs] 成功 RPS: ${String(s.successRps).padStart(7)} / 总 RPS: ${s.rps} | P50: ${s.p50Ms}ms · P95: ${s.p95Ms}ms | Err: ${(s.errorRate * 100).toFixed(2)}% (429:${s.rateLimitedRequests}) | 压测机 CPU: ${s.cpuBusyPct}% · Load1m: ${s.loadAvg1m} · Mem: ${s.memUsedGb}/${s.memTotalGb}GB`,
         );
       },
     });
     const outJson = saveCapacityReportJson(capReport, config.reportDir);
     const est = capReport.estimate;
-    console.log(`\n  ▶ 安全最大并发连接: ${est.maxHealthyVus} VUs (${est.maxHealthyRps} req/s) | 极限吞吐峰值: ${est.peakUsableRps} req/s`);
     console.log(
-      `  ▶ 正常可承载同时在线用户 (CCU): 约 ${est.recommendedOnlineUsers} 人（区间 ${est.concurrentOnlineUsersRange[0]} ~ ${est.concurrentOnlineUsersRange[1]} 人）`,
+      `\n  ▶ 安全最大并发连接: ${est.maxHealthyVus} VUs (${est.maxHealthyRps} req/s) | 极限吞吐峰值: ${est.peakUsableRps} req/s`,
     );
-    console.log(`  ▶ 正常可支撑日活用户规模 (DAU): 约 ${est.recommendedDau} 人/天  |  数据已存至 ${outJson}\n`);
+    console.log(
+      `  ▶ 按请求间隔假设换算的同时在线用户 (CCU): 约 ${est.recommendedOnlineUsers} 人（区间 ${est.concurrentOnlineUsersRange[0]} ~ ${est.concurrentOnlineUsersRange[1]} 人）`,
+    );
+    console.log(
+      `  ▶ 按日请求数假设换算的日活 (DAU): 约 ${est.recommendedDau} 人/天  |  数据已存至 ${outJson}\n`,
+    );
     return;
   }
 
+  let capturedToken: string | null = null;
   const report = await executeStressSuite(config, profile, {
-    onContextReady: (ctx, plan, issues) => printPreFlightBanner(ctx, profile, plan, issues),
+    onContextReady: (ctx, plan, issues) => {
+      capturedToken = ctx.accessToken;
+      printPreFlightBanner(ctx, profile, plan, issues);
+    },
     onScenarioStart: (index, total, title) => printScenarioHeader(index, total, title),
     onHttpProgress: (snapshot) => printLiveHttpProgress(snapshot),
     onScenarioComplete: (result) => printScenarioResult(result),
   });
 
   const saved = writeStressReports(report, config.reportDir);
+  if (capturedToken) {
+    try {
+      await fetch(`${config.serverUrl}/api/v1/stress-runs`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${capturedToken}`,
+        },
+        body: JSON.stringify(report),
+      });
+    } catch {
+      // 上报失败不阻塞本地报告输出
+    }
+  }
   printFinalSummary(report, saved);
 
   if (values.strict && !report.summary.overallPassed) {

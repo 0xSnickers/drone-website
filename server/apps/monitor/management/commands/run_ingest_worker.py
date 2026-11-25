@@ -5,70 +5,27 @@ import time
 from django.core.management.base import BaseCommand
 
 from apps.monitor.models import Project
-from apps.monitor.services.ingest import persist_events_batch, persist_logs_batch
-from apps.monitor.services.resilience import (
-    EVENTS_QUEUE_KEY,
-    LOGS_QUEUE_KEY,
-    pop_ingest_jobs,
-    requeue_ingest_jobs,
-)
+from apps.monitor.services.ingest import persist_job_once
+from apps.monitor.services.queue import IngestQueue
+from apps.monitor.services.resilience import EVENTS_QUEUE_KEY, LOGS_QUEUE_KEY
 
 logger = logging.getLogger(__name__)
+queue = IngestQueue()
 
 
 def drain_once(batch_size: int = 50) -> tuple[int, int]:
-    """Drain one batch of events and logs from Redis queues into PostgreSQL.
-
-    If PostgreSQL raises during persistence (e.g. primary DB failover), any remaining
-    unpersisted jobs are pushed back to the head of the Redis queue so zero data is lost.
-    """
-    events_processed = 0
-    logs_processed = 0
-    projects_cache: dict[str, Project | None] = {}
-
-    def get_project(pid: str) -> Project | None:
-        if pid not in projects_cache:
-            projects_cache[pid] = Project.objects.filter(pk=pid).first()
-        return projects_cache[pid]
-
-    event_jobs = pop_ingest_jobs(EVENTS_QUEUE_KEY, batch_size=batch_size)
-    for idx, job in enumerate(event_jobs):
-        try:
-            project = get_project(str(job.get("project_id") or ""))
-            if project is None:
-                continue
-            raw_events = job.get("events")
-            if isinstance(raw_events, list):
-                events_processed += persist_events_batch(
-                    project,
-                    raw_events,
-                    str(job.get("client_ip") or "127.0.0.1"),
-                    str(job.get("user_agent") or ""),
-                )
-        except Exception:
-            requeue_ingest_jobs(EVENTS_QUEUE_KEY, event_jobs[idx:])
-            raise
-
-    log_jobs = pop_ingest_jobs(LOGS_QUEUE_KEY, batch_size=batch_size)
-    for idx, job in enumerate(log_jobs):
-        try:
-            project = get_project(str(job.get("project_id") or ""))
-            if project is None:
-                continue
-            raw_logs = job.get("logs")
-            service = str(job.get("service") or "")
-            if service and isinstance(raw_logs, list):
-                logs_processed += persist_logs_batch(
-                    project,
-                    service,
-                    raw_logs,
-                    str(job.get("client_ip") or "127.0.0.1"),
-                )
-        except Exception:
-            requeue_ingest_jobs(LOGS_QUEUE_KEY, log_jobs[idx:])
-            raise
-
-    return events_processed, logs_processed
+    """Persist each delivery transactionally, then ACK; interrupted jobs remain recoverable."""
+    counts = []
+    for key in [EVENTS_QUEUE_KEY, LOGS_QUEUE_KEY]:
+        processed = 0
+        for delivery in queue.claim(key, batch_size):
+            job = delivery.payload
+            project = Project.objects.filter(pk=job.get("project_id")).first()
+            if project is not None:
+                processed += persist_job_once(project, job)
+            queue.acknowledge(key, delivery)
+        counts.append(processed)
+    return counts[0], counts[1]
 
 
 class Command(BaseCommand):

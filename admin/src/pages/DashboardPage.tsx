@@ -12,7 +12,7 @@ import {
 } from '@/features/analytics';
 import { IssueList } from '@/features/errors';
 import { useRangeParams } from '@/features/filters';
-import { SystemStatusCard } from '@/features/system';
+import { StressBottleneckCard, SystemStatusCard } from '@/features/system';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { bucketOfRange } from '@/types/monitor';
 
@@ -35,6 +35,7 @@ export function DashboardPage() {
     <>
       <PageHeader title={t('dashboard.title')} description={t('dashboard.description')} />
       <div className="space-y-4">
+        <StressBottleneckCard />
         <SystemStatusCard />
         <OverviewTiles
           overview={overview.data}

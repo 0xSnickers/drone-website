@@ -2,6 +2,7 @@ import {
   Compass,
   GraduationCap,
   Home,
+  LogIn,
   PlaneTakeoff,
   SlidersHorizontal,
   Store,
@@ -19,6 +20,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { cn } from '@/core/utils/cn';
+import { useAuth } from '@/features/auth';
 import { CartHeaderButton, CartToast } from '@/features/store';
 import { AppControls } from './AppControls';
 import { RouteTracker } from './RouteTracker';
@@ -49,6 +51,7 @@ function resolveSubtitleKey(pathname: string): string {
 export function MainLayout() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
+  const { status, user } = useAuth();
   const subtitleKey = resolveSubtitleKey(pathname);
 
   return (
@@ -120,13 +123,25 @@ export function MainLayout() {
 
             <CartHeaderButton />
 
-            <Link
-              to="/profile"
-              aria-label={t('nav.profile')}
-              className="ml-1 flex size-9 items-center justify-center rounded-full bg-surface-high text-primary ring-1 ring-primary/35 transition-colors hover:bg-primary hover:text-primary-foreground"
-            >
-              <UserRound className="size-4" />
-            </Link>
+            {status === 'authenticated' && user ? (
+              <Link
+                to="/profile"
+                aria-label={t('nav.profile')}
+                className="ml-1 flex h-9 items-center gap-2 rounded-full bg-surface-high px-2.5 text-xs font-semibold text-primary ring-1 ring-primary/35 transition-colors hover:bg-primary hover:text-primary-foreground"
+              >
+                <UserRound className="size-4 shrink-0" />
+                <span className="hidden max-w-24 truncate sm:inline">{user.name}</span>
+              </Link>
+            ) : (
+              <Link
+                to="/login"
+                aria-label={t('auth.login.submit')}
+                className="ml-1 flex h-9 items-center gap-1.5 rounded-full bg-surface-high px-3 text-xs font-semibold text-primary ring-1 ring-primary/35 transition-colors hover:bg-primary hover:text-primary-foreground"
+              >
+                <LogIn className="size-3.5 shrink-0" />
+                <span className="hidden sm:inline">{t('auth.login.submit')}</span>
+              </Link>
+            )}
           </div>
         </div>
       </header>

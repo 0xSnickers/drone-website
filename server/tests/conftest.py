@@ -11,8 +11,8 @@ def client():
     return APIClient()
 
 
-def login(client: APIClient, email: str, password: str):
-    res = client.post("/api/v1/auth/login", {"email": email, "password": password}, format="json")
+def login(client: APIClient, email: str, password: str, path: str = "/api/v1/auth/login"):
+    res = client.post(path, {"email": email, "password": password}, format="json")
     token = res.json()["data"]["accessToken"] if res.status_code == 200 else None
     return token, res
 
@@ -26,4 +26,4 @@ def member_token(client):
 @pytest.fixture
 def admin_token(client):
     seed_demo_user()
-    return login(client, DEMO_USER["email"], DEMO_USER["password"])[0]
+    return login(client, DEMO_USER["email"], DEMO_USER["password"], "/api/v1/admin/auth/login")[0]

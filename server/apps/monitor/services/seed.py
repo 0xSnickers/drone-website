@@ -15,6 +15,7 @@ from ..models import (
     ServerLog,
 )
 from ..utils import compute_error_fingerprint
+from .ops_history import seed_initial_release, sync_local_stress_reports
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ def seed_demo_monitor_data_on_startup() -> None:
             },
         )
         if not created and Event.objects.filter(project=project).exists():
+            seed_initial_release()
+            sync_local_stress_reports()
             return
 
         now = datetime.now(UTC)
@@ -132,6 +135,8 @@ def seed_demo_monitor_data_on_startup() -> None:
             ],
             extra={"status": 502},
         )
+        seed_initial_release()
+        sync_local_stress_reports()
         logger.info("seeded demo monitor project pk_demo_web")
     except Exception:
         logger.warning("skipping demo monitor seed (migrations may not have run yet)")

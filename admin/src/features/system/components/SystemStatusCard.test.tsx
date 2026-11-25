@@ -31,8 +31,8 @@ describe('SystemStatusCard', () => {
     });
 
     renderWithProviders(<SystemStatusCard />);
-    expect(await screen.findByText(/熔断降级保护中/)).toBeInTheDocument();
-    expect(screen.getByText(/保错采样直写 \(20%\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/保护模式运行中/)).toBeInTheDocument();
+    expect(screen.getByText(/降级抽样写入 \(20%\)/)).toBeInTheDocument();
     expect(screen.getByText(/postgresql \(1\.8 ms\)/)).toBeInTheDocument();
   });
 });

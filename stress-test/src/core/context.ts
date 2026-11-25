@@ -176,7 +176,7 @@ export function validatePreFlightContext(
   } else if (needAuth && !ctx.reachability.server.authenticated) {
     issues.push({
       component: 'server-auth',
-      url: `${ctx.config.serverUrl}/api/v1/auth/login`,
+      url: `${ctx.config.serverUrl}/api/v1/admin/auth/login`,
       reason: `压测账号 (${ctx.config.adminEmail}) 登录鉴权失败`,
       hint: '请确认后端开启 SEED_DEMO_USER=true 或配置正确的 STRESS_ADMIN_EMAIL / STRESS_ADMIN_PASSWORD',
     });
@@ -235,7 +235,7 @@ async function loginDemoAdmin(serverUrl: string, email: string, password: string
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch(`${serverUrl}/api/v1/auth/login`, {
+    const res = await fetch(`${serverUrl}/api/v1/admin/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -245,7 +245,7 @@ async function loginDemoAdmin(serverUrl: string, email: string, password: string
     if (!res.ok) return { accessToken: null, refreshCookie: null };
 
     const rawCookies = res.headers.getSetCookie?.() ?? [res.headers.get('set-cookie') ?? ''];
-    const cookieLine = rawCookies.find((c) => c.startsWith('refresh_token='));
+    const cookieLine = rawCookies.find((c) => c.startsWith('admin_refresh_token='));
     const refreshCookie = cookieLine ? (cookieLine.split(';')[0] ?? null) : null;
     const json = (await res.json()) as { code?: number; data?: { accessToken?: string } };
     if (json.code === 0 && typeof json.data?.accessToken === 'string') {

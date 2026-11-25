@@ -161,12 +161,29 @@ await check('refresh without cookie -> 401 UNAUTHORIZED', async () => {
   expectError(await call('POST', `${API}/auth/refresh`), 401, 'UNAUTHORIZED');
 });
 
+console.log('admin (demo account)');
+await check('login demo admin', async () => {
+  const data = expectOk(await call('POST', `${API}/admin/auth/login`, { body: DEMO }));
+  expect(data.user.role === 'admin', 'demo user must be admin');
+  ctx.admin = data.accessToken;
+});
+await check('web-audience admin token cannot access /users or monitor endpoints', async () => {
+  const webAdmin = expectOk(await call('POST', `${API}/auth/login`, { body: DEMO }));
+  expectError(await call('GET', `${API}/users`, { token: webAdmin.accessToken }), 403, 'FORBIDDEN');
+  expectError(await call('GET', `${API}/projects`, { token: webAdmin.accessToken }), 403, 'FORBIDDEN');
+});
+
 console.log('users');
 await check('list without token -> 401 UNAUTHORIZED', async () => {
   expectError(await call('GET', `${API}/users`), 401, 'UNAUTHORIZED');
 });
+await check('public members cannot read operations or the user directory', async () => {
+  for (const path of ['/users', '/projects', '/analytics/overview', '/logs', '/system/status']) {
+    expectError(await call('GET', `${API}${path}`, { token: ctx.token }), 403, 'FORBIDDEN');
+  }
+});
 await check('list -> pagination (default limit 10)', async () => {
-  const data = expectOk(await call('GET', `${API}/users`, { token: ctx.token }));
+  const data = expectOk(await call('GET', `${API}/users`, { token: ctx.admin }));
   expect(Array.isArray(data.items), 'items must be an array');
   const p = data.pagination;
   expect(p.page === 1 && p.limit === 10, `bad pagination ${JSON.stringify(p)}`);
@@ -174,22 +191,16 @@ await check('list -> pagination (default limit 10)', async () => {
   data.items.forEach(expectUser);
 });
 await check('list limit > 100 -> 400 VALIDATION_ERROR', async () => {
-  expectError(await call('GET', `${API}/users?limit=1000`, { token: ctx.token }), 400, 'VALIDATION_ERROR');
+  expectError(await call('GET', `${API}/users?limit=1000`, { token: ctx.admin }), 400, 'VALIDATION_ERROR');
 });
 await check('create as normal user -> 403 FORBIDDEN', async () => {
   const body = { name: 'Nope', email: `nope-${Date.now()}@example.com`, password: 'password123' };
   expectError(await call('POST', `${API}/users`, { token: ctx.token, body }), 403, 'FORBIDDEN');
 });
 await check('invalid id -> 400 VALIDATION_ERROR', async () => {
-  expectError(await call('GET', `${API}/users/not-a-uuid`, { token: ctx.token }), 400, 'VALIDATION_ERROR');
+  expectError(await call('GET', `${API}/users/not-a-uuid`, { token: ctx.admin }), 400, 'VALIDATION_ERROR');
 });
 
-console.log('admin (demo account)');
-await check('login demo admin', async () => {
-  const data = expectOk(await call('POST', `${API}/auth/login`, { body: DEMO }));
-  expect(data.user.role === 'admin', 'demo user must be admin');
-  ctx.admin = data.accessToken;
-});
 await check('admin CRUD', async () => {
   expect(ctx.admin, 'admin login failed (is SEED_DEMO_USER enabled?)');
   const token = ctx.admin;

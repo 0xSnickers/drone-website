@@ -1,4 +1,8 @@
-# AeroApex (`drone-website`) 本地环境与测试环境全链路压力测试报告
+# AeroApex (`drone-website`) 历史全链路压力测试报告
+
+> 历史快照说明：本报告产生时容量工具将总 RPS（含 429）用于 CCU/DAU 换算。现已改为成功业务 RPS，并对拒绝率与零成功样本设门禁。下文历史容量数字尚未用修正后的工具重新测量，不应作为承载承诺；CPU/内存来自压测机。
+>
+> 当前方案见 [CURRENT_SOLUTION.md](CURRENT_SOLUTION.md)，修复与验证进度见 [DEVELOPMENT_PROGRESS.md](DEVELOPMENT_PROGRESS.md)。下文保留原始测量与当时的诊断表述；旧队列、后台注册入口、网关状态码及调优清单均不是当前实现状态。原始报告路径为历史归档约定，本次文档整理未重新核验这些产物的完整性。
 
 - **压测日期**: `2026-11-25`
 - **压测引擎**: [`stress-test/`](../stress-test/README.md) (`drone-stress v0.1.0`，内置强制前置环境健康门禁 `PreFlightError`)

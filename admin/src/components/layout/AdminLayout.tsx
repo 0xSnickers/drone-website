@@ -9,7 +9,9 @@ import {
   Menu,
   MousePointerClick,
   Network,
+  Rocket,
   ScrollText,
+  Users,
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -33,11 +35,15 @@ const groups = [
       { to: '/errors', labelKey: 'nav.errors', icon: Bug },
       { to: '/logs', labelKey: 'nav.logs', icon: ScrollText },
       { to: '/ips', labelKey: 'nav.ips', icon: Network },
+      { to: '/ops', labelKey: 'nav.ops', icon: Rocket },
     ],
   },
   {
     labelKey: 'nav.groupSettings',
-    items: [{ to: '/projects', labelKey: 'nav.projects', icon: FolderKanban }],
+    items: [
+      { to: '/projects', labelKey: 'nav.projects', icon: FolderKanban },
+      { to: '/users', labelKey: 'nav.users', icon: Users },
+    ],
   },
 ] as const;
 

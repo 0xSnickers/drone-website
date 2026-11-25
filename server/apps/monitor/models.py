@@ -181,3 +181,61 @@ class IpRule(models.Model):
     class Meta:
         db_table = "ip_rules"
         ordering = ["-created_at"]
+
+
+class IngestReceipt(models.Model):
+    """Durable idempotency record for queued batches; committed with their rows."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "ingest_receipts"
+
+
+class ReleaseRecord(models.Model):
+    """Release / deployment record displayed in the admin Releases & Stress center."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    version = models.CharField(max_length=64, db_index=True)
+    environment = models.CharField(max_length=32, default="production")
+    commit_sha = models.CharField(max_length=64, default="", blank=True)
+    branch = models.CharField(max_length=64, default="main", blank=True)
+    status = models.CharField(max_length=24, default="success")
+    triggered_by = models.CharField(max_length=64, default="", blank=True)
+    notes = models.TextField(default="", blank=True)
+    ci_summary = models.JSONField(default=dict, blank=True)
+    deployed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "release_records"
+        ordering = ["-deployed_at"]
+
+
+class StressRunRecord(models.Model):
+    """Structured summary of each stress-test run for visual inspection in admin."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    run_id = models.CharField(max_length=80, unique=True)
+    release_version = models.CharField(max_length=64, default="", blank=True)
+    profile = models.CharField(max_length=40, default="l1-baseline")
+    profile_label = models.CharField(max_length=80, default="")
+    suite = models.CharField(max_length=32, default="all")
+    passed = models.BooleanField(default=False)
+    duration_sec = models.FloatField(default=0.0)
+    total_requests = models.IntegerField(default=0)
+    overall_rps = models.FloatField(default=0.0)
+    error_rate = models.FloatField(default=0.0)
+    passed_scenarios = models.IntegerField(default=0)
+    total_scenarios = models.IntegerField(default=0)
+    http_scenarios = models.JSONField(default=list, blank=True)
+    browser_scenarios = models.JSONField(default=list, blank=True)
+    recommendations = models.JSONField(default=list, blank=True)
+    environment = models.JSONField(default=dict, blank=True)
+    started_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "stress_run_records"
+        ordering = ["-started_at"]

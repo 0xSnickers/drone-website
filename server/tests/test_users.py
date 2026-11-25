@@ -13,11 +13,11 @@ def test_requires_authentication(client):
 
 
 def test_list_and_validation(client, member_token, admin_token):
-    res = client.get("/api/v1/users", **auth(member_token))
+    res = client.get("/api/v1/users", **auth(admin_token))
     data = res.json()["data"]
     assert data["pagination"] == {"page": 1, "limit": 10, "total": 2, "totalPages": 1}
-    assert client.get("/api/v1/users?limit=1000", **auth(member_token)).status_code == 400
-    assert client.get("/api/v1/users/not-a-uuid", **auth(member_token)).status_code == 400
+    assert client.get("/api/v1/users?limit=1000", **auth(admin_token)).status_code == 400
+    assert client.get("/api/v1/users/not-a-uuid", **auth(admin_token)).status_code == 400
 
 
 def test_only_admin_can_write(client, member_token, admin_token):

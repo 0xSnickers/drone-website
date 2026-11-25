@@ -6,6 +6,7 @@ from django.db import models
 class Role(models.TextChoices):
     USER = "user"
     ADMIN = "admin"
+    MONITOR_VIEWER = "monitor_viewer"
 
 
 class User(models.Model):

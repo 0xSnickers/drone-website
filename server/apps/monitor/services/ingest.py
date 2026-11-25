@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F
 
@@ -11,6 +13,7 @@ from ..models import (
     ErrorType,
     Event,
     EventType,
+    IngestReceipt,
     IpRule,
     IssueStatus,
     LogLevel,
@@ -25,10 +28,10 @@ from ..utils import (
     safe_json_payload,
     truncate_str,
 )
+from .queue import enqueue_ingest_job
 from .resilience import (
     EVENTS_QUEUE_KEY,
     LOGS_QUEUE_KEY,
-    enqueue_ingest_job,
     filter_degraded_events,
 )
 
@@ -71,7 +74,7 @@ def _validate_events(raw_events: object) -> list[dict]:
     for idx, item in enumerate(raw_events):
         if not isinstance(item, dict):
             raise _bad_param(f"events.{idx}", "must be an object")
-        if item.get("type") not in _VALID_EVENT_TYPES:
+        if not isinstance(item.get("type"), str) or item["type"] not in _VALID_EVENT_TYPES:
             raise _bad_param(f"events.{idx}.type", "invalid event type")
     return raw_events
 
@@ -98,7 +101,9 @@ def persist_events_batch(
 
         if ev_type == "error":
             err = item.get("error") if isinstance(item.get("error"), dict) else {}
-            err_type = err.get("type") if err.get("type") in _VALID_ERROR_TYPES else ErrorType.JS
+            err_type = err.get("type")
+            if not isinstance(err_type, str) or err_type not in _VALID_ERROR_TYPES:
+                err_type = ErrorType.JS
             err_msg = truncate_str(str(err.get("message") or item.get("name") or "Error"), 1000)
             err_stack = truncate_str(str(err.get("stack") or ""), 8000)
             err_source = truncate_str(str(err.get("source") or ""), 512)
@@ -192,6 +197,7 @@ def ingest_events(app_key: str | None, payload: dict, client_ip: str, user_agent
     project = _resolve_ingest_project(app_key, client_ip)
     raw_events = _validate_events(payload.get("events"))
     job = {
+        "job_id": str(uuid4()),
         "project_id": str(project.id),
         "events": raw_events,
         "client_ip": client_ip,
@@ -200,7 +206,10 @@ def ingest_events(app_key: str | None, payload: dict, client_ip: str, user_agent
     if enqueue_ingest_job(EVENTS_QUEUE_KEY, job):
         return len(raw_events)
     filtered = filter_degraded_events(raw_events)
-    persist_events_batch(project, filtered, client_ip, user_agent)
+    if settings.INGEST_MODE == "redis_queue":
+        persist_job_once(project, {**job, "events": filtered})
+    else:
+        persist_events_batch(project, filtered, client_ip, user_agent)
     return len(raw_events)
 
 
@@ -214,7 +223,10 @@ def _validate_logs(payload: dict) -> tuple[str, list[dict]]:
     for idx, entry in enumerate(raw_logs):
         if not isinstance(entry, dict):
             raise _bad_param(f"logs.{idx}", "must be an object")
-        if entry.get("level", LogLevel.INFO) not in _VALID_LOG_LEVELS:
+        if (
+            not isinstance(entry.get("level", LogLevel.INFO), str)
+            or entry.get("level", LogLevel.INFO) not in _VALID_LOG_LEVELS
+        ):
             raise _bad_param(f"logs.{idx}.level", "invalid log level")
         status_val = entry.get("status")
         if status_val is not None and (
@@ -261,6 +273,7 @@ def ingest_logs(app_key: str | None, payload: dict, client_ip: str) -> int:
     project = _resolve_ingest_project(app_key, client_ip)
     service, raw_logs = _validate_logs(payload)
     job = {
+        "job_id": str(uuid4()),
         "project_id": str(project.id),
         "service": service,
         "logs": raw_logs,
@@ -268,4 +281,17 @@ def ingest_logs(app_key: str | None, payload: dict, client_ip: str) -> int:
     }
     if enqueue_ingest_job(LOGS_QUEUE_KEY, job):
         return len(raw_logs)
+    if settings.INGEST_MODE == "redis_queue":
+        return persist_job_once(project, job)
     return persist_logs_batch(project, service, raw_logs, client_ip)
+
+
+@transaction.atomic
+def persist_job_once(project: Project, job: dict) -> int:
+    """The receipt and all data commit together; redelivery after a lost ACK is harmless."""
+    _, created = IngestReceipt.objects.get_or_create(id=job["job_id"])
+    if not created:
+        return 0
+    if "events" in job:
+        return persist_events_batch(project, job["events"], job["client_ip"], job["user_agent"])
+    return persist_logs_batch(project, job["service"], job["logs"], job["client_ip"])

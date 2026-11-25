@@ -13,7 +13,6 @@ import {
   getStoredTheme,
   storeColorMode,
   storeTheme,
-  watchSystemColorMode,
   type AppTheme,
   type ColorMode,
 } from '@/core/theme/theme';
@@ -33,11 +32,7 @@ export function AppPreferencesProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => applyTheme(theme), [theme]);
 
-  useEffect(() => {
-    applyColorMode(colorMode);
-    if (colorMode !== 'system') return undefined;
-    return watchSystemColorMode(() => applyColorMode('system'));
-  }, [colorMode]);
+  useEffect(() => applyColorMode(colorMode), [colorMode]);
 
   const value = useMemo<AppPreferencesContextValue>(
     () => ({

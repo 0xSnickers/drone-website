@@ -14,6 +14,7 @@ import {
   type PreFlightIssue,
   type RuntimeContext,
 } from '../core/context';
+import { clearStressHeartbeat, writeStressHeartbeat } from '../core/heartbeat';
 import { HttpLoadClient } from '../core/http-client';
 import {
   runHttpScenario,
@@ -89,17 +90,48 @@ export async function executeStressSuite(
   const totalCount = plan.httpScenarios.length + plan.browserPlans.length;
   const results: ScenarioResult[] = [];
   let currentIdx = 0;
+  const runId = `stress-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+  const startedAtIso = new Date().toISOString();
+  const peakConcurrency = Math.max(1, ...profile.httpPhases.map((p) => p.concurrency));
 
-  const peakSockets = Math.max(64, ...profile.httpPhases.map((p) => p.concurrency * 2));
+  const peakSockets = Math.max(64, peakConcurrency * 2);
   const sharedClient = new HttpLoadClient(peakSockets);
 
   try {
     for (const scenario of plan.httpScenarios) {
       currentIdx += 1;
+      writeStressHeartbeat(
+        {
+          active: true,
+          runId,
+          profile: profile.name,
+          suite: config.suite,
+          currentScenario: scenario.name,
+          concurrency: peakConcurrency,
+          startedAt: startedAtIso,
+          updatedAtMs: Date.now(),
+        },
+        config.reportDir,
+      );
       hooks?.onScenarioStart?.(currentIdx, totalCount, scenario.name);
       const res = await runHttpScenario(scenario, {
         client: sharedClient,
-        onProgress: hooks?.onHttpProgress,
+        onProgress: (snap) => {
+          writeStressHeartbeat(
+            {
+              active: true,
+              runId,
+              profile: profile.name,
+              suite: config.suite,
+              currentScenario: scenario.name,
+              concurrency: snap.concurrency,
+              startedAt: startedAtIso,
+              updatedAtMs: Date.now(),
+            },
+            config.reportDir,
+          );
+          hooks?.onHttpProgress?.(snap);
+        },
       });
       results.push(res);
       hooks?.onScenarioComplete?.(res);
@@ -108,26 +140,43 @@ export async function executeStressSuite(
     sharedClient.destroy();
   }
 
-  if (plan.browserPlans.length > 0) {
-    const { driver, skippedReason } = await resolveBrowserDriver({
-      driverPreference: config.browserDriver,
-      chromeBin: config.chromeBin || undefined,
-      headless: config.headless,
-    });
+  try {
+    if (plan.browserPlans.length > 0) {
+      const { driver, skippedReason } = await resolveBrowserDriver({
+        driverPreference: config.browserDriver,
+        chromeBin: config.chromeBin || undefined,
+        headless: config.headless,
+      });
 
-    try {
-      for (const bPlan of plan.browserPlans) {
-        currentIdx += 1;
-        hooks?.onScenarioStart?.(currentIdx, totalCount, bPlan.name);
-        const res = await runBrowserScenarioWithDriver(bPlan, profile, driver, skippedReason);
-        results.push(res);
-        hooks?.onScenarioComplete?.(res);
-      }
-    } finally {
-      if (driver) {
-        await driver.close();
+      try {
+        for (const bPlan of plan.browserPlans) {
+          currentIdx += 1;
+          writeStressHeartbeat(
+            {
+              active: true,
+              runId,
+              profile: profile.name,
+              suite: config.suite,
+              currentScenario: bPlan.name,
+              concurrency: profile.browserConcurrency,
+              startedAt: startedAtIso,
+              updatedAtMs: Date.now(),
+            },
+            config.reportDir,
+          );
+          hooks?.onScenarioStart?.(currentIdx, totalCount, bPlan.name);
+          const res = await runBrowserScenarioWithDriver(bPlan, profile, driver, skippedReason);
+          results.push(res);
+          hooks?.onScenarioComplete?.(res);
+        }
+      } finally {
+        if (driver) {
+          await driver.close();
+        }
       }
     }
+  } finally {
+    clearStressHeartbeat(config.reportDir);
   }
 
   const totalDurationSec = round((performance.now() - startedPerf) / 1000, 2);
@@ -144,7 +193,7 @@ export async function executeStressSuite(
   const failedScenarios = results.length - passedScenarios - skippedScenarios;
 
   return {
-    runId: `stress-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`,
+    runId,
     generatedAt: new Date().toISOString(),
     durationSec: totalDurationSec,
     profile,

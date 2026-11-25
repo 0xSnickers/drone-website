@@ -146,3 +146,19 @@ class IpRuleSerializer(serializers.ModelSerializer):
 class IpRuleInputSerializer(serializers.Serializer):
     ip = serializers.CharField(min_length=3, max_length=64)
     note = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+
+
+class MonitorQuerySerializer(serializers.Serializer):
+    type = serializers.ChoiceField(
+        choices=["pageview", "track", "performance", "js", "promise", "resource", "api", "custom"],
+        required=False,
+    )
+    level = serializers.ChoiceField(choices=["debug", "info", "warn", "error"], required=False)
+    projectId = serializers.UUIDField(required=False)
+    range = serializers.ChoiceField(choices=["1h", "24h", "7d", "30d"], default="24h")
+    tz = serializers.CharField(max_length=100, required=False)
+    page = serializers.IntegerField(min_value=1, default=1)
+    limit = serializers.IntegerField(min_value=1, max_value=100, default=20)
+    sort = serializers.ChoiceField(choices=["frequent", "recent"], required=False)
+    status = serializers.ChoiceField(choices=["open", "resolved", "ignored"], required=False)
+    statusClass = serializers.RegexField(r"^[1-5]xx$", required=False)

@@ -16,11 +16,11 @@ export const themeNames = Object.keys(themes) as AppTheme[];
 
 export const defaultTheme: AppTheme = 'blue';
 
-export const colorModes = ['light', 'dark', 'system'] as const;
+export const colorModes = ['light', 'dark'] as const;
 
 export type ColorMode = (typeof colorModes)[number];
 
-export const defaultColorMode: ColorMode = 'system';
+export const defaultColorMode: ColorMode = 'light';
 
 export const THEME_STORAGE_KEY = storageKey('theme');
 export const COLOR_MODE_STORAGE_KEY = storageKey('color-mode');
@@ -51,14 +51,7 @@ export function storeColorMode(mode: ColorMode): void {
   safeStorage.set(COLOR_MODE_STORAGE_KEY, mode);
 }
 
-function prefersDark(): boolean {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    ? window.matchMedia('(prefers-color-scheme: dark)').matches
-    : false;
-}
-
 export function resolveColorMode(mode: ColorMode): 'light' | 'dark' {
-  if (mode === 'system') return prefersDark() ? 'dark' : 'light';
   return mode;
 }
 
@@ -75,7 +68,7 @@ export function applyTheme(theme: AppTheme): void {
   root.dataset.theme = theme;
 }
 
-/** 切换浅色 / 深色，`system` 跟随操作系统。 */
+/** 切换浅色 / 深色。 */
 export function applyColorMode(mode: ColorMode): void {
   if (typeof document === 'undefined') return;
 
@@ -87,19 +80,8 @@ export function applyColorMode(mode: ColorMode): void {
   root.dataset.colorMode = mode;
 }
 
-/** 监听系统深浅色变化，仅在 `system` 模式下需要。返回取消监听函数。 */
-export function watchSystemColorMode(onChange: () => void): () => void {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return () => {};
-  }
-
-  const media = window.matchMedia('(prefers-color-scheme: dark)');
-  media.addEventListener('change', onChange);
-  return () => media.removeEventListener('change', onChange);
-}
-
 /**
  * 首屏防闪烁脚本：在页面渲染前同步应用已保存的主题和深浅色。
  * Vite 模板内联在 index.html，Next.js 模板在根 layout 中通过 <script> 注入。
  */
-export const themeInitScript = `(function(){try{var t=${JSON.stringify(themes)};var s=localStorage;var n=s.getItem('${THEME_STORAGE_KEY}');var m=s.getItem('${COLOR_MODE_STORAGE_KEY}')||'${defaultColorMode}';var r=document.documentElement;if(t[n]){r.style.setProperty('--primary',t[n].primary);r.style.setProperty('--ring',t[n].primary);r.style.setProperty('--secondary',t[n].secondary);r.dataset.theme=n;}var d=m==='dark'||(m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';}catch(e){}})();`;
+export const themeInitScript = `(function(){try{var t=${JSON.stringify(themes)};var s=localStorage;var n=s.getItem('${THEME_STORAGE_KEY}');var m=s.getItem('${COLOR_MODE_STORAGE_KEY}');if(m!=='light'&&m!=='dark'){m='${defaultColorMode}';}var r=document.documentElement;if(t[n]){r.style.setProperty('--primary',t[n].primary);r.style.setProperty('--ring',t[n].primary);r.style.setProperty('--secondary',t[n].secondary);r.dataset.theme=n;}var d=m==='dark';r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';}catch(e){}})();`;

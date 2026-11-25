@@ -4,7 +4,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
-from apps.auth.authentication import IsAdminForWrites
+from apps.auth.authentication import IsAdmin, IsAdminAudience
 from apps.core.responses import ok, page_result
 
 from . import services
@@ -30,7 +30,7 @@ def _validated(serializer_class, data) -> dict:
 
 
 class UserListView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminForWrites]
+    permission_classes = [IsAuthenticated, IsAdminAudience, IsAdmin]
 
     def get(self, request):
         query = _validated(PageQuerySerializer, request.query_params)
@@ -44,7 +44,7 @@ class UserListView(APIView):
 
 
 class UserDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminForWrites]
+    permission_classes = [IsAuthenticated, IsAdminAudience, IsAdmin]
 
     def get(self, request, user_id: str):
         return ok(UserSerializer(services.get_user(_parse_id(user_id))).data)

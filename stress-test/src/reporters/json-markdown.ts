@@ -13,7 +13,9 @@ export function renderMarkdownReport(report: StressRunReport): string {
   lines.push('');
   lines.push(`- **生成时间**: \`${report.generatedAt}\``);
   lines.push(`- **压测档位**: \`${report.profile.name}\`（${report.profile.label}）`);
-  lines.push(`- **压测套件**: \`${report.suite}\` | **总耗时**: \`${report.durationSec}s\` | **综合结论**: **${verdict}**`);
+  lines.push(
+    `- **压测套件**: \`${report.suite}\` | **总耗时**: \`${report.durationSec}s\` | **综合结论**: **${verdict}**`,
+  );
   lines.push(
     `- **运行环境**: Node \`${report.environment.nodeVersion}\` · \`${report.environment.platform}/${report.environment.arch}\` · CPU \`${report.environment.cpuCount} cores\``,
   );
@@ -39,12 +41,12 @@ export function renderMarkdownReport(report: StressRunReport): string {
     lines.push('## 2. HTTP 并发压测指标明细');
     lines.push('');
     lines.push(
-      '| 场景名称 | 峰值并发 | 总请求 | 吞吐 (RPS) | 成功 / 429限流 / 失败 | 错误率 | P50 | P95 | P99 | TTFB P95 | SLA |',
+      '| 场景名称 | 峰值并发 | 总请求 | 总 / 成功 RPS | 成功 / 429限流 / 失败 | 错误率 | P50 | P95 | P99 | TTFB P95 | SLA |',
     );
     lines.push('| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | :---: |');
     for (const r of httpResults) {
       lines.push(
-        `| ${r.name} | ${r.peakConcurrency} | ${r.totalRequests} | **${r.rps}** | ${r.okRequests} / ${r.rateLimitedRequests} / ${r.failedRequests} | ${round(r.errorRate * 100, 2)}% | ${r.latencyMs.p50}ms | **${r.latencyMs.p95}ms** | ${r.latencyMs.p99}ms | ${r.ttfbMs.p95}ms | ${r.sla.passed ? '✅' : '❌'} |`,
+        `| ${r.name} | ${r.peakConcurrency} | ${r.totalRequests} | ${r.rps} / **${r.successRps}** | ${r.okRequests} / ${r.rateLimitedRequests} / ${r.failedRequests} | ${round(r.errorRate * 100, 2)}% | ${r.latencyMs.p50}ms | **${r.latencyMs.p95}ms** | ${r.latencyMs.p99}ms | ${r.ttfbMs.p95}ms | ${r.sla.passed ? '✅' : '❌'} |`,
       );
     }
     lines.push('');
@@ -57,7 +59,9 @@ export function renderMarkdownReport(report: StressRunReport): string {
     lines.push(
       '| 场景名称 | 驱动 | 并发实例 | 导航成功/总数 | FCP P95 | LCP P95 | Load P95 | 交互均值 | JS Heap 峰值 | DOM 均值 | JS 异常 | SLA |',
     );
-    lines.push('| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: |');
+    lines.push(
+      '| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: |',
+    );
     for (const b of browserResults) {
       if (b.driverUsed === 'skipped') {
         lines.push(

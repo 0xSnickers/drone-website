@@ -1,21 +1,10 @@
 export type ProfileName = 'smoke' | 'l1-baseline' | 'l2-growth' | 'l3-burst' | 'spike';
 
 export type SuiteName =
-  | 'all'
-  | 'frontend'
-  | 'backend'
-  | 'assets'
-  | 'browser'
-  | 'sdk'
-  | 'api'
-  | 'mixed';
+  'all' | 'frontend' | 'backend' | 'assets' | 'browser' | 'sdk' | 'api' | 'mixed';
 
 export type ScenarioCategory =
-  | 'frontend-assets'
-  | 'frontend-browser'
-  | 'frontend-sdk'
-  | 'backend-api'
-  | 'mixed';
+  'frontend-assets' | 'frontend-browser' | 'frontend-sdk' | 'backend-api' | 'mixed';
 
 export type BrowserDriverType = 'auto' | 'playwright' | 'cdp';
 
@@ -34,6 +23,8 @@ export interface SlaThreshold {
   maxP99Ms: number;
   /** 最低期望吞吐 RPS（可选） */
   minRps?: number;
+  /** 最大拒绝率（默认 1%）；限流不属于服务崩溃，但不能视作可用容量。 */
+  maxRateLimitRate?: number;
 }
 
 export interface LoadProfile {
@@ -145,6 +136,9 @@ export interface HttpScenarioResult {
   failedRequests: number;
   errorRate: number;
   rps: number;
+  successRps: number;
+  rateLimitRate: number;
+  successLatencyMs: LatencySummary;
   throughputBytesPerSec: number;
   totalBytes: number;
   latencyMs: LatencySummary;

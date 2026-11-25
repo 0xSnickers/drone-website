@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import zlib from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runHttpScenario, type LiveProgressSnapshot } from '../src/core/load-runner';
+import { classifyCapacityStep, estimateUserCapacity } from '../src/core/capacity';
 
 describe('runHttpScenario load runner', () => {
   let server: http.Server;
@@ -43,6 +44,42 @@ describe('runHttpScenario load runner', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
+  it('never treats an all-429 service as healthy business capacity', async () => {
+    const result = await runHttpScenario({
+      id: 'all-429',
+      name: 'all-429',
+      category: 'mixed',
+      targetUrl: baseUrl,
+      phases: [{ name: 'sustain', durationSec: 0.1, concurrency: 2 }],
+      timeoutMs: 1000,
+      sla: { maxErrorRate: 0.01, maxP95Ms: 500, maxP99Ms: 1000 },
+      nextRequest: () => ({ method: 'GET', url: `${baseUrl}/rate-limit`, allowRateLimit: true }),
+    });
+    expect(result.totalRequests).toBeGreaterThan(0);
+    expect(result.okRequests).toBe(0);
+    expect(result.errorRate).toBe(0);
+    expect(result.successRps).toBe(0);
+    expect(result.rateLimitRate).toBe(1);
+    expect(result.sla.passed).toBe(false);
+    const metric = { ...result, p95Ms: result.successLatencyMs.p95 };
+    expect(classifyCapacityStep(metric)).toBe('overloaded');
+    const estimate = estimateUserCapacity([
+      {
+        ...metric,
+        concurrency: 2,
+        p50Ms: 0,
+        p99Ms: 0,
+        cpuBusyPct: 0,
+        loadAvg1m: 0,
+        memUsedGb: 0,
+        memTotalGb: 1,
+        zone: 'healthy', // Recheck raw measurements even if a caller supplies a stale classification.
+      },
+    ]);
+    expect(estimate.recommendedOnlineUsers).toBe(0);
+    expect(estimate.recommendedDau).toBe(0);
+  });
+
   it('executes multi-phase HTTP load, records TTFB/latencies, and distinguishes 429 from errors', async () => {
     const snapshots: LiveProgressSnapshot[] = [];
     const result = await runHttpScenario(
@@ -81,7 +118,8 @@ describe('runHttpScenario load runner', () => {
     expect(result.errorRate).toBe(0);
     expect(result.latencyMs.p95).toBeGreaterThanOrEqual(0);
     expect(result.ttfbMs.max).toBeGreaterThanOrEqual(0);
-    expect(result.sla.passed).toBe(true);
+    expect(result.sla.passed).toBe(false);
+    expect(result.successRps).toBeLessThan(result.rps);
     expect(snapshots.length).toBeGreaterThanOrEqual(0);
   });
 });

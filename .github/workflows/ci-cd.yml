@@ -177,14 +177,16 @@ jobs:
           done
           curl -fsS http://127.0.0.1:9000/api/ready
 
-          # 1. Run full 24-case API contract test suite against live Postgres 16
+          # 1. Run API contracts and reliable queue recovery against disposable Redis 7
           BASE_URL=http://127.0.0.1:9000 node scripts/contract-test.mjs
+          TEST_REDIS_URL=redis://127.0.0.1:6379/14 uv run pytest --ds=config.settings tests/integration
 
           # 2. Verify async Redis ingest queue + run_ingest_worker end-to-end
           curl -fsS -X POST http://127.0.0.1:9000/api/v1/ingest/events \
             -H "Content-Type: application/json" \
-            -d '{"appKey":"pk_demo_web","events":[{"type":"pageview","url":"https://aeroapex.com/flagship"}]}'
+            -d '{"appKey":"pk_demo_web","events":[{"type":"track","name":"ci_worker_probe","url":"https://aeroapex.com/flagship"}]}'
           uv run python manage.py run_ingest_worker --once
+          uv run python manage.py shell -c "from apps.monitor.models import Event; assert Event.objects.filter(name='ci_worker_probe').count() == 1"
 
           kill "$(cat /tmp/gunicorn-ci.pid)" || true
 

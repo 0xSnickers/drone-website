@@ -2,6 +2,12 @@ from django.urls import path
 
 from .views.analytics import AudienceView, OverviewView, PagesView, SystemStatusView, TrendView
 from .views.ingest import IngestEventsView, IngestLogsView
+from .views.ops_history import (
+    ReleaseDetailView,
+    ReleaseListCreateView,
+    StressRunDetailView,
+    StressRunListCreateView,
+)
 from .views.projects import (
     IpRuleDeleteView,
     IpRuleListCreateView,
@@ -45,4 +51,8 @@ urlpatterns = [
     path("ips/<str:ip>", IpDetailView.as_view()),
     path("ip-rules", IpRuleListCreateView.as_view()),
     path("ip-rules/<uuid:rule_id>", IpRuleDeleteView.as_view()),
+    path("releases", ReleaseListCreateView.as_view()),
+    path("releases/<uuid:release_id>", ReleaseDetailView.as_view()),
+    path("stress-runs", StressRunListCreateView.as_view()),
+    path("stress-runs/<str:run_id>", StressRunDetailView.as_view()),
 ]

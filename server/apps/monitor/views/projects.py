@@ -1,7 +1,7 @@
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
-from apps.auth.authentication import IsAdmin, IsAdminForWrites
+from apps.auth.authentication import CanReadMonitor, IsAdmin, IsAdminForWrites
 from apps.core.exceptions import AppError
 from apps.core.responses import ok, page_result
 
@@ -17,7 +17,7 @@ from ..utils import generate_app_key, parse_pagination
 
 
 class ProjectListCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminForWrites]
+    permission_classes = [IsAuthenticated, CanReadMonitor, IsAdminForWrites]
 
     def get(self, request):
         page, limit = parse_pagination(request.query_params, default_limit=20)
@@ -39,7 +39,7 @@ class ProjectListCreateView(APIView):
 
 
 class ProjectDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminForWrites]
+    permission_classes = [IsAuthenticated, CanReadMonitor, IsAdminForWrites]
 
     def _get(self, project_id: str) -> Project:
         project = Project.objects.filter(pk=project_id).first()
@@ -69,7 +69,7 @@ class ProjectDetailView(APIView):
 
 
 class ProjectRotateKeyView(APIView):
-    permission_classes = [IsAuthenticated, IsAdmin]
+    permission_classes = [IsAuthenticated, CanReadMonitor, IsAdmin]
 
     def post(self, request, project_id: str):
         project = Project.objects.filter(pk=project_id).first()
@@ -81,7 +81,7 @@ class ProjectRotateKeyView(APIView):
 
 
 class IpRuleListCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminForWrites]
+    permission_classes = [IsAuthenticated, CanReadMonitor, IsAdminForWrites]
 
     def get(self, request):
         return ok(IpRuleSerializer(IpRule.objects.all(), many=True).data)
@@ -97,7 +97,7 @@ class IpRuleListCreateView(APIView):
 
 
 class IpRuleDeleteView(APIView):
-    permission_classes = [IsAuthenticated, IsAdmin]
+    permission_classes = [IsAuthenticated, CanReadMonitor, IsAdmin]
 
     def delete(self, request, rule_id: str):
         rule = IpRule.objects.filter(pk=rule_id).first()

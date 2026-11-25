@@ -1,8 +1,8 @@
 # 接口契约
 
-5 个后端模板对外行为完全一致，也与 `my-frontend-template` 的请求层和 `scripts/mock-server.mjs` 一致：前端把 Mock 换成任意一个后端模板即可直接跑通。
+本契约适用于本项目的 Django 后端、官网与监控后台。统一响应继承模板约定；权限和监控扩展以本项目为准。
 
-改契约时必须同时改 5 个模板、`scripts/contract-test.mjs` 和本文件。
+改契约时同步本项目实现、前端调用方、`scripts/contract-test.mjs` 与测试；不修改其他模板。
 
 ## 1. 基础
 
@@ -52,7 +52,9 @@
 | 400 | `VALIDATION_ERROR` | 参数、请求体、路径 ID 校验失败；JSON 解析失败 | 请求参数不合法 | Invalid request parameters |
 | 401 | `UNAUTHORIZED` | 未携带 / 无效 / 过期的 accessToken；refresh_token 无效 | 未登录或登录已过期 | Authentication required |
 | 401 | `INVALID_CREDENTIALS` | 登录邮箱或密码错误 | 邮箱或密码错误 | Invalid email or password |
-| 403 | `FORBIDDEN` | 已登录但角色不足 | 没有权限执行该操作 | Permission denied |
+| 403 | `FORBIDDEN` | 已登录但角色或端受众（audience）不足 | 没有权限执行该操作 | Permission denied |
+| 403 | `ADMIN_ACCESS_REQUIRED` | 非监控角色尝试登录或刷新管理端会话 | 仅管理员或监控查看者可登录管理端 | Admin or monitor viewer role required |
+| 403 | `AUDIENCE_MISMATCH` | 登录凭证受众与当前端不匹配 | 当前登录凭证不适用于此端，请重新登录 | Token audience does not match this portal |
 | 404 | `NOT_FOUND` | 路由不存在 | 接口不存在 | Resource not found |
 | 404 | `USER_NOT_FOUND` | 用户不存在（业务资源统一 `<RESOURCE>_NOT_FOUND`） | 用户不存在 | User not found |
 | 405 | `METHOD_NOT_ALLOWED` | 路由存在但方法不支持（部分框架返回 404，均可接受） | 不支持的请求方法 | Method not allowed |
@@ -64,20 +66,25 @@
 
 ## 4. 鉴权
 
-- **accessToken**：JWT（HS256），`sub` 为用户 ID，`role` 为角色；有效期 `ACCESS_TOKEN_TTL` 秒（默认 900）。放在响应体里返回，前端只存内存，请求时带 `Authorization: Bearer <token>`。
-- **refresh_token**：随机不透明字符串，数据库只存 SHA-256 哈希；有效期 `REFRESH_TOKEN_TTL` 秒（默认 7 天）。通过 Cookie 下发：
-  `refresh_token=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=<ttl>`，`COOKIE_SECURE=true` 时加 `Secure`。
-- refresh 不轮换 token（与 Next.js BFF 的 `/auth/session` 兼容），登出时吊销。
-- 角色：`user`、`admin`。
+- **accessToken**：JWT（HS256），`sub` 为用户 ID，`role` 为角色，`aud` 为端受众（官网 `web` / 管理端 `admin`）；有效期 `ACCESS_TOKEN_TTL` 秒（默认 900）。放在响应体里返回，前端只存内存，请求时带 `Authorization: Bearer <token>`。
+- **刷新凭证隔离**：随机不透明字符串，数据库只存 SHA-256 哈希与所属 `audience`；有效期 `REFRESH_TOKEN_TTL` 秒（默认 7 天）。官网下发 `refresh_token`，管理端下发 `admin_refresh_token`，两端登录、刷新与登出互不干扰：
+  `<cookie_name>=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=<ttl>`，`COOKIE_SECURE=true` 时加 `Secure`。
+- refresh 不轮换 token（与 Next.js BFF 的 `/auth/session` 兼容），登出时按对应 `audience` 吊销。
+- 角色：`user`（官网会员）、`monitor_viewer`（受信任的全项目只读监控人员）、`admin`（管理员）。公开注册始终创建 `user`，忽略角色输入；只有管理员可通过用户接口授予监控权限。管理端登录要求 `admin` 或 `monitor_viewer`，否则返回 403 `ADMIN_ACCESS_REQUIRED`；监控查询接口要求 `aud = admin`。当前为单组织权限模型，不提供项目间租户隔离。
 
 | 方法 | 路径 | 鉴权 | 请求 | `data` |
 |---|---|---|---|---|
-| POST | `/api/v1/auth/register` | - | `{ name, email, password }` | `{ user, accessToken }` + Set-Cookie（201） |
-| POST | `/api/v1/auth/login` | - | `{ email, password }` | `{ user, accessToken }` + Set-Cookie |
-| POST | `/api/v1/auth/refresh` | Cookie | - | `{ user, accessToken }` |
-| POST | `/api/v1/auth/session` | Cookie | - | 同 refresh（Next.js BFF 使用） |
-| POST | `/api/v1/auth/logout` | Cookie（可选） | - | `{ success: true }` + 清除 Cookie |
+| POST | `/api/v1/auth/register` | - | `{ name, email, password }` | `{ user, accessToken(aud=web) }` + `refresh_token` Cookie（201） |
+| POST | `/api/v1/auth/login` | - | `{ email, password }` | `{ user, accessToken(aud=web) }` + `refresh_token` Cookie |
+| POST | `/api/v1/auth/refresh` | `refresh_token` Cookie | - | `{ user, accessToken(aud=web) }` |
+| POST | `/api/v1/auth/session` | `refresh_token` Cookie | - | 同 refresh（Next.js BFF 使用） |
+| POST | `/api/v1/auth/logout` | `refresh_token` Cookie（可选） | - | `{ success: true }` + 清除 `refresh_token` |
 | GET | `/api/v1/auth/me` | Bearer | - | `user` |
+| POST | `/api/v1/admin/auth/login` | -（需 `admin` / `monitor_viewer`） | `{ email, password }` | `{ user, accessToken(aud=admin) }` + `admin_refresh_token` Cookie |
+| POST | `/api/v1/admin/auth/refresh` | `admin_refresh_token` Cookie | - | `{ user, accessToken(aud=admin) }` |
+| POST | `/api/v1/admin/auth/session` | `admin_refresh_token` Cookie | - | 同 admin refresh |
+| POST | `/api/v1/admin/auth/logout` | `admin_refresh_token` Cookie（可选） | - | `{ success: true }` + 清除 `admin_refresh_token` |
+| GET | `/api/v1/admin/auth/me` | Bearer（`aud=admin` + 监控角色） | - | `user` |
 
 校验规则：`name` 去首尾空格后 2~50 字符；`email` 去空格并转小写后为合法邮箱；`password` 8~72 字符。
 
@@ -91,8 +98,8 @@
 
 | 方法 | 路径 | 鉴权 | 请求 | `data` |
 |---|---|---|---|---|
-| GET | `/api/v1/users?page=1&limit=10` | Bearer | - | 分页 `user` |
-| GET | `/api/v1/users/:id` | Bearer | - | `user` |
+| GET | `/api/v1/users?page=1&limit=10` | admin | - | 分页 `user` |
+| GET | `/api/v1/users/:id` | admin | - | `user` |
 | POST | `/api/v1/users` | admin | `{ name, email, password, role? }` | `user`（201） |
 | PUT | `/api/v1/users/:id` | admin | `{ name?, email?, role? }` | `user` |
 | DELETE | `/api/v1/users/:id` | admin | - | `{ id }` |
@@ -108,14 +115,14 @@
 
 ## 7. 演示账号
 
-`SEED_DEMO_USER=true`（开发环境默认）时，启动时若不存在则创建：`demo@example.com` / `password123`，角色 `admin`。与前端 Mock 的演示账号一致。生产环境务必关闭。
+`SEED_DEMO_USER=true`（开发环境默认）时，启动时若不存在则创建管理端账号 `demo@example.com` / `password123`（角色 `admin`）与官网会员账号 `pilot@aeroapex.com` / `password123`（角色 `user`）。生产环境务必关闭。
 
 ## 8. 数据表
 
 | 表 | 字段 |
 |---|---|
 | `users` | `id uuid PK`、`email varchar(255) UNIQUE`、`name varchar(50)`、`password_hash varchar(255)`、`role varchar(20) DEFAULT 'user'`、`created_at`、`updated_at` |
-| `refresh_tokens` | `id uuid PK`、`user_id uuid FK → users ON DELETE CASCADE`、`token_hash varchar(64) UNIQUE`、`expires_at`、`created_at` |
+| `refresh_tokens` | `id uuid PK`、`user_id uuid FK → users ON DELETE CASCADE`、`token_hash varchar(64) UNIQUE`、`audience varchar(16) DEFAULT 'web'`、`expires_at`、`created_at` |
 
 ---
 
@@ -129,7 +136,7 @@
 |---|---|---|---|---|
 | 401 | `INVALID_APP_KEY` | 上报时 appKey 缺失或不存在 | appKey 无效 | Invalid app key |
 | 403 | `IP_BLOCKED` | 上报方 IP 在黑名单中 | 该 IP 已被禁止上报 | This IP is blocked |
-| 429 | `RATE_LIMITED` | 上报接口单 IP 每分钟超过 `INGEST_RATE_LIMIT` | 请求过于频繁，请稍后再试 | Too many requests |
+| 429 | `RATE_LIMITED` | 上报接口单 IP 超过 `INGEST_RATE_LIMIT` 或异步队列满载 | 请求过于频繁，请稍后再试 | Too many requests |
 | 404 | `PROJECT_NOT_FOUND` | 项目不存在 | 项目不存在 | Project not found |
 | 404 | `ISSUE_NOT_FOUND` | 异常问题不存在 | 异常不存在 | Issue not found |
 | 404 | `IP_RULE_NOT_FOUND` | 黑名单规则不存在 | IP 规则不存在 | IP rule not found |
@@ -146,6 +153,8 @@
 | `tz` | IANA 时区（如 `Asia/Shanghai`），按当地时间切分小时 / 天；非法值按 `UTC` |
 | `page` / `limit` | 明细列表分页，`limit` 默认 20（1~100） |
 
+非法 UUID、range、分页、sort、status、statusClass 返回 400 `VALIDATION_ERROR`；非法 tz 仍按 UTC 回落。
+
 趋势数据为连续时间桶（空桶补 0），`bucket` 为该桶起点的 ISO UTC 时间。
 
 ## 11. 上报接口（公开，用 appKey 识别项目）
@@ -153,7 +162,7 @@
 - appKey 放在请求体 `appKey` 或请求头 `X-App-Key`；appKey 可以公开放在前端代码中。
 - 允许任意来源跨域（不带 Cookie）；同时接受 `application/json` 和 `text/plain`（内容为 JSON，兼容 `navigator.sendBeacon`，避免 CORS 预检）。
 - 校验顺序：限流（429）→ appKey（401）→ IP 黑名单（403）→ 字段校验（400）。
-- IP、浏览器、系统、设备由服务端根据连接和 `User-Agent` 解析；`TRUST_PROXY=true` 时 IP 取自 `X-Forwarded-For`。
+- IP、浏览器、系统、设备由服务端根据连接和 `User-Agent` 解析；`TRUST_PROXY=true` 且连接来源位于 `TRUSTED_PROXY_CIDRS` 时，从右向左跳过可信代理解析 `X-Forwarded-For`；非法链回落为连接 IP。边缘网关覆盖外部传入的 XFF。
 - 超长字符串截断而不是拒收；`properties` / `meta` / `breadcrumbs` 序列化后超过 4KB 时替换为 `{ "_truncated": true }`。
 - 客户端时间 `ts` 只用于展示，超出 [当前 - 1 天, 当前] 时以服务端时间为准；统计一律按服务端接收时间。
 
@@ -161,6 +170,14 @@
 |---|---|---|---|
 | POST | `/api/v1/ingest/events` | `{ appKey?, events: Event[1..100] }` | `{ accepted }` |
 | POST | `/api/v1/ingest/logs` | `{ appKey?, service, logs: Log[1..200] }` | `{ accepted }` |
+
+异步模式 `INGEST_MODE=redis_queue` 使用 Redis 7 Streams 消费组：
+
+- `accepted` 表示接收或入队，非已落库；消费者提交数据库事务后才确认删除。未确认的任务超过 `INGEST_VISIBILITY_TIMEOUT_MS` 可重新领取；该值应高于最长单批事务耗时。
+- 批次 UUID 与 `ingest_receipts` 在同一事务提交，防止确认丢失或入队响应丢失后的重复落库。HTTP 客户端重新发送的新批次仍可能重复，当前不承诺端到端 exactly-once。
+- 队列容量达到 `INGEST_QUEUE_MAXLEN` 时返回 429，保留已接收任务，不再裁剪队列。Redis 必须配置 `noeviction`；持久性仍取决于 Redis AOF、备份和基础设施。
+- Redis 不可用时保留原有降级策略：事件按 `INGEST_FALLBACK_SAMPLE_RATE` 采样直写，异常全量保留；日志直接写库。这属于有损保护，`accepted` 不表示全量保存。批次收据以本次降级结果为准。
+- 旧 List 队列由新消费者分批原子迁移；升级应先停止旧 worker，再启动新 worker，避免旧消费方式继续产生未确认窗口。非法队列载荷保留在 pending 并记录错误日志，需人工检查，当前未自动进入死信队列。
 
 `Event`：
 
@@ -185,33 +202,35 @@
 
 `Log`：`{ level: debug|info|warn|error, message, ts?, requestId?, method?, path?, status?(100~599), durationMs?, ip?（终端用户 IP）, userAgent?, meta? }`。
 
-## 12. 查询接口（需要登录；写操作需要 admin）
+## 12. 查询接口（需要监控权限；写操作需要 admin）
+
+`Monitor` = 已登录且角色为 `admin` 或 `monitor_viewer`；普通官网会员一律返回 403 `FORBIDDEN`，未登录返回 401。只读监控人员可以读取所有项目，管理操作仅限 admin。
 
 | 方法 | 路径 | 权限 | 说明 / `data` |
 |---|---|---|---|
-| GET | `/api/v1/system/status` | Bearer | 容灾与队列健康状态 `{ service, ingestMode, effectiveMode, database, redis, protection }` |
-| GET | `/api/v1/projects` | Bearer | 分页 `project` |
-| GET | `/api/v1/projects/:id` | Bearer | `project` |
+| GET | `/api/v1/system/status` | Monitor | 容灾、队列与实时瓶颈健康状态 `{ service, ingestMode, effectiveMode, database, redis, protection, host, traffic, bottleneck, stressTest }` |
+| GET | `/api/v1/projects` | Monitor | 分页 `project` |
+| GET | `/api/v1/projects/:id` | Monitor | `project` |
 | POST | `/api/v1/projects` | admin | `{ name(2~50), description?(≤200) }` → `project`（201，自动生成 `appKey`） |
 | PUT | `/api/v1/projects/:id` | admin | `{ name?, description? }` → `project` |
 | POST | `/api/v1/projects/:id/rotate-key` | admin | 重置 appKey，旧 key 立即失效 → `project`（201） |
 | DELETE | `/api/v1/projects/:id` | admin | 级联删除该项目全部监控数据 → `{ id }` |
-| GET | `/api/v1/analytics/overview` | Bearer | `{ range, current: Totals, previous: Totals }`（previous 为上一个等长周期） |
-| GET | `/api/v1/analytics/trend` | Bearer | `[{ bucket, pv, uv, errors, requests, serverErrors }]` |
-| GET | `/api/v1/analytics/pages` | Bearer | 热门页面 `[{ path, pv, uv }]`（20 条） |
-| GET | `/api/v1/analytics/audience` | Bearer | `{ referrers, browsers, systems, devices }` |
-| GET | `/api/v1/events` | Bearer | 行为明细分页；筛选 `type` `name` `visitorId` `userId` `ip` `path` `release` |
-| GET | `/api/v1/events/summary` | Bearer | 埋点汇总 `[{ name, count, visitors, lastSeen }]` |
-| GET | `/api/v1/errors/issues` | Bearer | 范围内发生过的问题分页（含 `rangeCount`、`users`、`latestRelease`）；筛选 `status` `type` `q` `release`，`sort=frequent|recent` |
-| GET | `/api/v1/errors/issues/:id` | Bearer | 问题 + `{ trend, users, browsers, systems, releases }` |
-| GET | `/api/v1/errors/issues/:id/events` | Bearer | 发生记录分页（堆栈、breadcrumbs、环境） |
+| GET | `/api/v1/analytics/overview` | Monitor | `{ range, current: Totals, previous: Totals }`（previous 为上一个等长周期） |
+| GET | `/api/v1/analytics/trend` | Monitor | `[{ bucket, pv, uv, errors, requests, serverErrors }]` |
+| GET | `/api/v1/analytics/pages` | Monitor | 热门页面 `[{ path, pv, uv }]`（20 条） |
+| GET | `/api/v1/analytics/audience` | Monitor | `{ referrers, browsers, systems, devices }` |
+| GET | `/api/v1/events` | Monitor | 行为明细分页；筛选 `type` `name` `visitorId` `userId` `ip` `path` `release` |
+| GET | `/api/v1/events/summary` | Monitor | 埋点汇总 `[{ name, count, visitors, lastSeen }]` |
+| GET | `/api/v1/errors/issues` | Monitor | 范围内发生过的问题分页（含 `rangeCount`、`users`、`latestRelease`）；筛选 `status` `type` `q` `release`，`sort=frequent|recent` |
+| GET | `/api/v1/errors/issues/:id` | Monitor | 问题 + `{ trend, users, browsers, systems, releases }` |
+| GET | `/api/v1/errors/issues/:id/events` | Monitor | 发生记录分页（堆栈、breadcrumbs、环境） |
 | PUT | `/api/v1/errors/issues/:id` | admin | `{ status: open|resolved|ignored }` |
-| GET | `/api/v1/logs` | Bearer | 日志分页；筛选 `service` `level` `statusClass(2xx..5xx)` `requestId` `ip` `q` |
-| GET | `/api/v1/logs/stats` | Bearer | `{ levels, statuses, trend, slowest }`（慢接口按 P95 排序）；可选 `service` |
-| GET | `/api/v1/logs/services` | Bearer | `[{ service, projectId, lastSeen }]` |
-| GET | `/api/v1/ips` | Bearer | IP 汇总分页（合并前端事件、异常、后端请求）；`q` 为 IP 前缀 |
-| GET | `/api/v1/ips/:ip` | Bearer | `{ summary, trend, pages, agents, visitors, errors, requests }` |
-| GET | `/api/v1/ip-rules` | Bearer | 黑名单 |
+| GET | `/api/v1/logs` | Monitor | 日志分页；筛选 `service` `level` `statusClass(2xx..5xx)` `requestId` `ip` `q` |
+| GET | `/api/v1/logs/stats` | Monitor | `{ levels, statuses, trend, slowest }`（慢接口按 P95 排序）；可选 `service` |
+| GET | `/api/v1/logs/services` | Monitor | `[{ service, projectId, lastSeen }]` |
+| GET | `/api/v1/ips` | Monitor | IP 汇总分页（合并前端事件、异常、后端请求）；`q` 为 IP 前缀 |
+| GET | `/api/v1/ips/:ip` | Monitor | `{ summary, trend, pages, agents, visitors, errors, requests }` |
+| GET | `/api/v1/ip-rules` | Monitor | 黑名单 |
 | POST | `/api/v1/ip-rules` | admin | `{ ip, note? }` → 规则（201） |
 | DELETE | `/api/v1/ip-rules/:id` | admin | `{ id }` |
 
@@ -219,7 +238,7 @@
 
 ## 13. 本服务自身日志
 
-`SELF_LOG_ENABLED=true` 时，本服务每个请求（不含健康检查和成功的上报请求）以及应用级 warn / error（含异常堆栈）异步批量写入 `server_logs`，`projectId` 为空、`service` 为 `SERVICE_NAME`。
+`SELF_LOG_ENABLED=true` 时，当前由中间件在响应阶段将本服务请求（不含健康检查和成功的上报请求）同步写入 `server_logs`，`projectId` 为空、`service` 为 `SERVICE_NAME`。应用级 warn / error 堆栈捕获与异步批量入库属于后续待实现能力（见 `docs/DEVELOPMENT_PROGRESS.md`）。
 
 ## 14. 数据表（新增）
 
@@ -231,5 +250,6 @@
 | `error_events` | 每次发生；`issue_id → error_issues ON DELETE CASCADE` |
 | `server_logs` | 后端日志；`project_id` 可空（本服务） |
 | `ip_rules` | 黑名单，`ip UNIQUE` |
+| `ingest_receipts` | 异步队列与降级写入批次幂等收据；`job_id uuid PK`、`project_id`、`accepted`、`created_at` |
 
-超过 `DATA_RETENTION_DAYS` 的事件、异常发生记录、日志每小时清理一次。
+目标保留策略：超过 `DATA_RETENTION_DAYS` 的事件、异常发生记录、日志与历史收据按周期清理（定时清理命令与调度入口尚未实现，见 `docs/DEVELOPMENT_PROGRESS.md`）。

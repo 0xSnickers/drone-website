@@ -2,7 +2,6 @@ import { LogOut } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/features/auth';
-import { UserListPanel } from '@/features/users';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 /** 需要登录的页面（在 router.tsx 的 RequireAuth 分组中注册）。 */
@@ -35,7 +34,6 @@ export function ProfilePage() {
         <dt className="text-muted-foreground">{t('profile.fields.role')}</dt>
         <dd className="font-mono text-xs text-primary uppercase">{user.role}</dd>
       </dl>
-      <UserListPanel />
     </section>
   );
 }

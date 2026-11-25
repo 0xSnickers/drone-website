@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { createBrowserRouter } from 'react-router';
+import { createBrowserRouter, Navigate } from 'react-router';
 import { RouteErrorPage } from '@/components/error/RouteErrorPage';
 import { AdminLayout } from '@/components/layout/AdminLayout';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -31,9 +31,7 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'register',
-                ...page(async () => ({
-                  Component: (await import('@/pages/RegisterPage')).RegisterPage,
-                })),
+                element: <Navigate to="/login" replace />,
               },
             ],
           },
@@ -93,6 +91,18 @@ export const router = createBrowserRouter([
                 path: 'projects',
                 ...page(async () => ({
                   Component: (await import('@/pages/ProjectsPage')).ProjectsPage,
+                })),
+              },
+              {
+                path: 'users',
+                ...page(async () => ({
+                  Component: (await import('@/pages/UsersPage')).UsersPage,
+                })),
+              },
+              {
+                path: 'ops',
+                ...page(async () => ({
+                  Component: (await import('@/pages/OpsPage')).OpsPage,
                 })),
               },
               { path: '*', Component: NotFoundPage },

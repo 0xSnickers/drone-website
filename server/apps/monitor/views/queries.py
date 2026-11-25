@@ -1,7 +1,7 @@
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
-from apps.auth.authentication import IsAdminForWrites
+from apps.auth.authentication import CanReadMonitor, IsAdminForWrites
 from apps.core.exceptions import AppError
 from apps.core.responses import ok
 
@@ -19,17 +19,16 @@ from ..services.queries import (
     list_log_services,
     list_logs,
 )
-from ..utils import parse_pagination, resolve_time_window
+from ..utils import parse_pagination
+from .analytics import cached_monitor_query
+from .query_params import query_context
 
 
 class _QueryBaseView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanReadMonitor]
 
     def _ctx(self, request):
-        params = request.query_params
-        project_id = params.get("projectId") or None
-        window = resolve_time_window(params.get("range"), params.get("tz"))
-        return project_id, window
+        return query_context(request.query_params)
 
 
 class EventListView(_QueryBaseView):
@@ -42,7 +41,14 @@ class EventListView(_QueryBaseView):
 class EventSummaryView(_QueryBaseView):
     def get(self, request):
         project_id, window = self._ctx(request)
-        return ok(get_events_summary(project_id, window))
+        key = (
+            "events_summary",
+            project_id,
+            request.query_params.get("range", "24h"),
+            request.query_params.get("from", ""),
+            request.query_params.get("to", ""),
+        )
+        return ok(cached_monitor_query(key, lambda: get_events_summary(project_id, window)))
 
 
 class ErrorIssueListView(_QueryBaseView):
@@ -53,12 +59,10 @@ class ErrorIssueListView(_QueryBaseView):
 
 
 class ErrorIssueDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminForWrites]
+    permission_classes = [IsAuthenticated, CanReadMonitor, IsAdminForWrites]
 
     def get(self, request, issue_id: str):
-        window = resolve_time_window(
-            request.query_params.get("range"), request.query_params.get("tz")
-        )
+        _, window = query_context(request.query_params)
         return ok(get_issue_detail(issue_id, window))
 
     def put(self, request, issue_id: str):
@@ -89,7 +93,16 @@ class LogListView(_QueryBaseView):
 class LogStatsView(_QueryBaseView):
     def get(self, request):
         project_id, window = self._ctx(request)
-        return ok(get_logs_stats(project_id, window, request.query_params.get("service")))
+        service = request.query_params.get("service")
+        key = (
+            "logs_stats",
+            project_id,
+            service or "",
+            request.query_params.get("range", "24h"),
+            request.query_params.get("from", ""),
+            request.query_params.get("to", ""),
+        )
+        return ok(cached_monitor_query(key, lambda: get_logs_stats(project_id, window, service)))
 
 
 class LogServicesView(_QueryBaseView):
@@ -102,7 +115,18 @@ class IpListView(_QueryBaseView):
     def get(self, request):
         project_id, window = self._ctx(request)
         page, limit = parse_pagination(request.query_params)
-        return ok(list_ips(project_id, window, request.query_params.get("q"), page, limit))
+        q = request.query_params.get("q")
+        key = (
+            "ips_list",
+            project_id,
+            q or "",
+            page,
+            limit,
+            request.query_params.get("range", "24h"),
+            request.query_params.get("from", ""),
+            request.query_params.get("to", ""),
+        )
+        return ok(cached_monitor_query(key, lambda: list_ips(project_id, window, q, page, limit)))
 
 
 class IpDetailView(_QueryBaseView):

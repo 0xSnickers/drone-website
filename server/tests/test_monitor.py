@@ -124,3 +124,67 @@ def test_ingest_events_errors_analytics_and_ip_block(client, admin_headers):
     )
     assert blocked.status_code == 403
     assert blocked.json()["code"] == "IP_BLOCKED"
+
+
+@pytest.mark.django_db
+def test_releases_and_stress_runs_crud(client, admin_headers):
+    rel = client.post(
+        "/api/v1/releases",
+        {
+            "version": "v1.2.0",
+            "environment": "production",
+            "branch": "main",
+            "commitSha": "abc12345",
+            "status": "success",
+            "notes": "Shipped ops center",
+        },
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert rel.status_code == 201
+    rel_id = rel.json()["data"]["id"]
+
+    listed = client.get("/api/v1/releases", **admin_headers)
+    assert listed.status_code == 200
+    assert listed.json()["data"]["items"][0]["version"] == "v1.2.0"
+
+    run = client.post(
+        "/api/v1/stress-runs",
+        {
+            "runId": "stress-test-001",
+            "suite": "backend",
+            "durationSec": 12.5,
+            "profile": {"name": "l1-baseline", "label": "L1 起步期基线"},
+            "summary": {
+                "overallPassed": True,
+                "totalHttpRequests": 1000,
+                "overallRps": 80.0,
+                "overallErrorRate": 0.0,
+                "passedScenarios": 4,
+                "totalScenarios": 4,
+            },
+            "httpScenarios": [
+                {
+                    "id": "ops",
+                    "name": "Probes",
+                    "totalRequests": 1000,
+                    "successRequests": 1000,
+                    "rps": 80.0,
+                    "successRps": 80.0,
+                    "latency": {"p50": 10, "p95": 20, "p99": 30},
+                    "passed": True,
+                }
+            ],
+            "recommendations": ["All healthy"],
+        },
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert run.status_code == 201
+    detail = client.get("/api/v1/stress-runs/stress-test-001", **admin_headers)
+    assert detail.status_code == 200
+    assert detail.json()["data"]["passed"] is True
+    assert len(detail.json()["data"]["httpScenarios"]) == 1
+
+    deleted = client.delete(f"/api/v1/releases/{rel_id}", **admin_headers)
+    assert deleted.status_code == 200

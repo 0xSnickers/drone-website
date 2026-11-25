@@ -70,8 +70,8 @@ npm run stress -- --env staging --profile l2-growth --suite mixed --concurrency 
 ### 关于单 IP 限流 (HTTP 429) 与海量访客模拟
 
 后端 `/api/v1/ingest/*` 默认启用单 IP 速率限制（`INGEST_RATE_LIMIT=600`/分钟）：
-- 默认压测（不带 `--simulate-ips`）可验证单 IP 限流器是否正常返回 `429 RATE_LIMITED`（压测引擎会将预期内的 `429` 单独统计为限流保护命中，不计入服务崩溃错误率）。
-- 若需绕过单 IP 限流测试后端真实多访客写入吞吐上限，可在后端 `.env` 开启 `TRUST_PROXY=true`，并执行：
+- 默认压测（不带 `--simulate-ips`）可验证单 IP 限流器是否正常返回 `429 RATE_LIMITED`（压测引擎将 `429` 单独统计，不计入服务崩溃错误率；默认限流拒绝率超过 1% 时 SLA 不通过，零成功请求也不能通过）。
+- 若需绕过单 IP 限流测试后端真实多访客写入吞吐上限，仅在隔离测试环境直连后端并将压测来源加入 `TRUSTED_PROXY_CIDRS` 后，可开启 `TRUST_PROXY=true`，并执行：
   ```bash
   npm run stress:sdk -- --profile l2-growth --simulate-ips
   ```
@@ -88,3 +88,9 @@ npm run stress -- --env staging --profile l2-growth --suite mixed --concurrency 
 ```bash
 npm run check   # eslint + tsc --noEmit + vitest + tsup build
 ```
+
+## 容量口径
+
+`rps` 为所有已完成响应的速率（包含限流），`successRps` 为成功且未限流的业务响应速率。容量档位使用成功响应的 P95；拒绝率超过 1% 或成功样本为零均判为 overloaded。CCU / DAU 仅由可用档位的 `successRps` 和文中请求间隔假设换算，属于估计，不代表服务承诺或落库吞吐保证。
+
+容量 JSON 的 `hostSpec.measurementSource=load-generator` 明确 CPU、Load、内存来自压测机；对远程目标，需要单独采集服务器指标。网关会覆盖外来 XFF，`--simulate-ips` 仅适用于隔离环境直连且显式信任的压测机。

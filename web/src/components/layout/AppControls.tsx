@@ -1,4 +1,4 @@
-import { Languages, Monitor, Moon, Palette, Sun } from 'lucide-react';
+import { Languages, Moon, Palette, Sun } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { localeLabels, locales } from '@/core/i18n/locales';
@@ -7,7 +7,7 @@ import { getNextValue } from '@/core/utils/cycle';
 import { useCartStore } from '@/features/store';
 import { useAppPreferences } from '@/providers/appPreferencesContext';
 
-const colorModeIcons = { light: Sun, dark: Moon, system: Monitor } as const;
+const colorModeIcons = { light: Sun, dark: Moon } as const;
 
 /** 语言 / 主题色 / 深浅色切换（每次切换均有即时提示反馈）。 */
 export function AppControls() {

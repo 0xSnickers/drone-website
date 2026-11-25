@@ -26,9 +26,9 @@ node scripts/contract-test.mjs                                  # 默认 http://
 BASE_URL=http://localhost:9100 node scripts/contract-test.mjs
 ```
 
-覆盖 24 项：运维接口、404、校验错误、非法 JSON、错误文案多语言、注册 / 登录 / me / refresh / session / logout、Cookie 属性、401 / 403、分页默认值、admin CRUD、409、吊销后 refresh 失败。
+覆盖 25 项（含官网会员不能读取监控与用户目录）：运维接口、404、校验错误、非法 JSON、错误文案多语言、注册 / 登录 / me / refresh / session / logout、Cookie 属性、401 / 403、分页默认值、admin CRUD、409、吊销后 refresh 失败。
 
-改了接口行为时，先改 `API_CONTRACT.md` 和 `contract-test.mjs`，再改 5 个模板，最后对每个模板跑一遍契约测试。
+改接口行为时，同步本项目 `API_CONTRACT.md`、`contract-test.mjs`、服务端与前端；不修改其他技术栈模板。
 
 ## 写测试的约定
 
@@ -36,3 +36,5 @@ BASE_URL=http://localhost:9100 node scripts/contract-test.mjs
 - 每个业务错误码至少一个用例；鉴权接口覆盖 401 / 403。
 - 测试之间不共享状态：每个用例或每个文件重建内存数据（Spring Boot 用不同邮箱隔离）。
 - 不在测试里连接真实外部服务；需要集成测试时单独建目录并在 CI 中准备数据库。
+
+本项目可运行 `./scripts/check-contract.sh` 在临时 SQLite 与独立端口执行契约检查。真实 Redis 恢复集成测试需显式提供测试用 `TEST_REDIS_URL`；发布集成测试会启动独立的临时 Nginx / Gunicorn。缺少外部工具时对应集成项会显示跳过，不能视为已验证。

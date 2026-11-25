@@ -2,11 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { StressEnvConfig } from '../config/types';
-import {
-  PreFlightError,
-  prepareRuntimeContext,
-  validatePreFlightContext,
-} from './context';
+import { PreFlightError, prepareRuntimeContext, validatePreFlightContext } from './context';
+import { clearStressHeartbeat, writeStressHeartbeat } from './heartbeat';
 import { HttpLoadClient } from './http-client';
 import { runHttpScenario, type HttpScenarioDefinition } from './load-runner';
 import { round } from './stats';
@@ -18,6 +15,7 @@ export type StepHealthZone = 'healthy' | 'degraded' | 'overloaded';
 export interface CapacityStepMetric {
   concurrency: number;
   rps: number;
+  successRps: number;
   totalRequests: number;
   okRequests: number;
   rateLimitedRequests: number;
@@ -55,6 +53,7 @@ export interface CapacityBenchmarkReport {
   targetMode: 'mixed' | 'frontend-only';
   stepDurationSec: number;
   hostSpec: {
+    measurementSource: 'load-generator';
     cpuModel: string;
     cpuCores: number;
     totalMemGb: number;
@@ -89,27 +88,38 @@ function computeCpuBusyPct(before: CpuSnapshot, after: CpuSnapshot): number {
 export function classifyCapacityStep(metric: {
   errorRate: number;
   p95Ms: number;
+  totalRequests: number;
+  okRequests: number;
+  rateLimitedRequests: number;
 }): StepHealthZone {
-  if (metric.errorRate === 0 && metric.p95Ms <= 500) return 'healthy';
+  if (
+    !metric.okRequests ||
+    metric.totalRequests <= 0 ||
+    metric.rateLimitedRequests / metric.totalRequests > 0.01
+  )
+    return 'overloaded';
+  if (metric.errorRate === 0 && metric.okRequests === metric.totalRequests && metric.p95Ms <= 500)
+    return 'healthy';
   if (metric.errorRate <= 0.01 && metric.p95Ms <= 1500) return 'degraded';
   return 'overloaded';
 }
 
 export function estimateUserCapacity(steps: CapacityStepMetric[]): UserCapacityEstimate {
-  const healthySteps = steps.filter((s) => s.zone === 'healthy');
-  const usableSteps = steps.filter((s) => s.zone !== 'overloaded');
+  const healthySteps = steps.filter((s) => classifyCapacityStep(s) === 'healthy');
+  const usableSteps = steps.filter((s) => classifyCapacityStep(s) !== 'overloaded');
 
-  const bestHealthy =
-    healthySteps.sort((a, b) => b.rps - a.rps)[0] ??
-    usableSteps.sort((a, b) => b.rps - a.rps)[0] ??
-    null;
+  const bestHealthy = healthySteps.sort((a, b) => b.successRps - a.successRps)[0] ?? null;
 
-  const bestUsable = usableSteps.sort((a, b) => b.rps - a.rps)[0] ?? bestHealthy;
+  const bestUsable = usableSteps.sort((a, b) => b.successRps - a.successRps)[0] ?? null;
 
-  const maxHealthyVus = bestHealthy ? Math.max(...healthySteps.map((s) => s.concurrency), bestHealthy.concurrency) : 0;
-  const maxHealthyRps = bestHealthy ? bestHealthy.rps : 0;
-  const peakUsableVus = bestUsable ? Math.max(...usableSteps.map((s) => s.concurrency), bestUsable.concurrency) : 0;
-  const peakUsableRps = bestUsable ? bestUsable.rps : 0;
+  const maxHealthyVus = bestHealthy
+    ? Math.max(...healthySteps.map((s) => s.concurrency), bestHealthy.concurrency)
+    : 0;
+  const maxHealthyRps = bestHealthy ? bestHealthy.successRps : 0;
+  const peakUsableVus = bestUsable
+    ? Math.max(...usableSteps.map((s) => s.concurrency), bestUsable.concurrency)
+    : 0;
+  const peakUsableRps = bestUsable ? bestUsable.successRps : 0;
 
   // 真实在线用户平均每 4~8 秒产生 1 次有效请求（标准均值 6 秒，预留 20% 安全余量取 0.8 系数）
   const safeRps = maxHealthyRps > 0 ? maxHealthyRps * 0.8 : peakUsableRps * 0.6;
@@ -184,9 +194,24 @@ export async function runCapacityBenchmark(
   const client = new HttpLoadClient(Math.max(128, maxVus * 2));
   const memTotalGb = round(os.totalmem() / 1024 ** 3, 2);
   const steps: CapacityStepMetric[] = [];
+  const startedAtIso = new Date().toISOString();
+  const runId = `capacity-${startedAtIso.replace(/[:.]/g, '-').slice(0, 19)}`;
 
   try {
     for (const vus of concurrencySteps) {
+      writeStressHeartbeat(
+        {
+          active: true,
+          runId,
+          profile: 'capacity',
+          suite: mode,
+          currentScenario: `${baseScenario.name} (${vus} VUs)`,
+          concurrency: vus,
+          startedAt: startedAtIso,
+          updatedAtMs: Date.now(),
+        },
+        config.reportDir,
+      );
       const cpuBefore = readCpuSnapshot();
       const res = await runHttpScenario(
         {
@@ -201,20 +226,24 @@ export async function runCapacityBenchmark(
       const memUsedGb = round((os.totalmem() - os.freemem()) / 1024 ** 3, 2);
       const zone = classifyCapacityStep({
         errorRate: res.errorRate,
-        p95Ms: res.latencyMs.p95,
+        p95Ms: res.successLatencyMs.p95,
+        totalRequests: res.totalRequests,
+        okRequests: res.okRequests,
+        rateLimitedRequests: res.rateLimitedRequests,
       });
 
       const stepMetric: CapacityStepMetric = {
         concurrency: vus,
         rps: res.rps,
+        successRps: res.successRps,
         totalRequests: res.totalRequests,
         okRequests: res.okRequests,
         rateLimitedRequests: res.rateLimitedRequests,
         failedRequests: res.failedRequests,
         errorRate: res.errorRate,
-        p50Ms: res.latencyMs.p50,
-        p95Ms: res.latencyMs.p95,
-        p99Ms: res.latencyMs.p99,
+        p50Ms: res.successLatencyMs.p50,
+        p95Ms: res.successLatencyMs.p95,
+        p99Ms: res.successLatencyMs.p99,
         cpuBusyPct,
         loadAvg1m,
         memUsedGb,
@@ -225,6 +254,7 @@ export async function runCapacityBenchmark(
       options?.onStepResult?.(stepMetric);
     }
   } finally {
+    clearStressHeartbeat(config.reportDir);
     client.destroy();
   }
 
@@ -234,6 +264,7 @@ export async function runCapacityBenchmark(
     targetMode: mode,
     stepDurationSec,
     hostSpec: {
+      measurementSource: 'load-generator',
       cpuModel: cpus[0]?.model.trim() ?? 'Unknown CPU',
       cpuCores: cpus.length,
       totalMemGb: memTotalGb,

@@ -22,6 +22,16 @@ MESSAGES: dict[str, tuple[str, str]] = {
     "ISSUE_NOT_FOUND": ("异常不存在", "Issue not found"),
     "IP_RULE_NOT_FOUND": ("IP 规则不存在", "IP rule not found"),
     "IP_RULE_EXISTS": ("该 IP 已在黑名单中", "IP is already blocked"),
+    "RELEASE_NOT_FOUND": ("发版记录不存在", "Release record not found"),
+    "STRESS_RUN_NOT_FOUND": ("压测记录不存在", "Stress run not found"),
+    "ADMIN_ACCESS_REQUIRED": (
+        "仅管理员或监控查看者可登录管理端",
+        "Admin or monitor viewer role required",
+    ),
+    "AUDIENCE_MISMATCH": (
+        "当前登录凭证不适用于此端，请重新登录",
+        "Token audience does not match this portal",
+    ),
 }
 
 

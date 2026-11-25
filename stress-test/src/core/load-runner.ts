@@ -139,12 +139,20 @@ export async function runHttpScenario(
   const totalBytes = samples.reduce((acc, s) => acc + s.bytes, 0);
   const errorRate = totalRequests > 0 ? round(failedRequests / totalRequests, 4) : 0;
   const rps = round(totalRequests / durationSec, 2);
+  const successRps = round(okRequests / durationSec, 2);
+  const rateLimitRate = totalRequests > 0 ? rateLimitedCount / totalRequests : 0;
+  const successLatencyMs = summarizeLatencies(
+    samples.filter((s) => s.ok && !s.rateLimited).map((s) => s.durationMs),
+  );
   const throughputBytesPerSec = Math.round(totalBytes / durationSec);
 
   const latencyMs = summarizeLatencies(samples.map((s) => s.durationMs));
   const ttfbMs = summarizeLatencies(samples.filter((s) => s.ttfbMs > 0).map((s) => s.ttfbMs));
   const timeline = buildTimeline(samples, startedWallMs, durationSec);
-  const sla = evaluateHttpSla({ errorRate, latencyMs, rps }, def.sla);
+  const sla = evaluateHttpSla(
+    { errorRate, latencyMs, rps: successRps, rateLimitRate, okRequests },
+    def.sla,
+  );
 
   return {
     kind: 'http',
@@ -162,6 +170,9 @@ export async function runHttpScenario(
     failedRequests,
     errorRate,
     rps,
+    successRps,
+    rateLimitRate,
+    successLatencyMs,
     throughputBytesPerSec,
     totalBytes,
     latencyMs,
