@@ -16,9 +16,10 @@ export interface Issue {
   count: number;
   firstSeen: string;
   lastSeen: string;
-  /** 列表接口返回：时间范围内的次数和影响访客数。 */
+  /** 列表接口返回：时间范围内的次数、影响访客数与最新触发的构建版本号。 */
   rangeCount?: number;
   users?: number;
+  latestRelease?: string | null;
 }
 
 export interface IssueDetail extends Issue {
@@ -26,6 +27,7 @@ export interface IssueDetail extends Issue {
   users: number;
   browsers: Named[];
   systems: Named[];
+  releases?: Named[];
 }
 
 export interface Breadcrumb {
@@ -55,6 +57,7 @@ export interface ErrorOccurrence {
 export interface IssueFilters {
   status?: IssueStatus;
   type?: ErrorType;
+  release?: string;
   q?: string;
   sort?: 'frequent' | 'recent';
   page?: number;

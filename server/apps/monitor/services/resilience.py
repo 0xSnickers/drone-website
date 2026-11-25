@@ -61,6 +61,17 @@ def is_circuit_open() -> bool:
         return time.monotonic() < _CIRCUIT_OPEN_UNTIL
 
 
+def get_circuit_remaining_sec() -> int:
+    with _STATE_LOCK:
+        rem = _CIRCUIT_OPEN_UNTIL - time.monotonic()
+        return max(0, int(rem)) if rem > 0 else 0
+
+
+def get_local_tracked_ips() -> int:
+    with _STATE_LOCK:
+        return len(_LOCAL_RATE_WINDOWS)
+
+
 def reset_resilience_state() -> None:
     """Reset in-memory windows and circuit breaker (used in tests)."""
     global _CIRCUIT_OPEN_UNTIL

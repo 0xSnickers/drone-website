@@ -39,6 +39,11 @@ class _FakeRedisHandler(socketserver.StreamRequestHandler):
                     self.wfile.write(f":{srv.store[args[1]]}\r\n".encode())
                 elif cmd == "EXPIRE":
                     self.wfile.write(b":1\r\n")
+                elif cmd == "PING":
+                    self.wfile.write(b"+PONG\r\n")
+                elif cmd == "LLEN":
+                    lst = srv.lists.get(args[1], [])
+                    self.wfile.write(f":{len(lst)}\r\n".encode())
                 elif cmd == "RPUSH":
                     lst = srv.lists.setdefault(args[1], [])
                     lst.extend(args[2:])
@@ -234,3 +239,11 @@ def test_circuit_breaker_degradation_and_recovery(client, admin_token, settings,
     assert res2.status_code == 200
     assert resilience.is_circuit_open() is False
     assert len(fake_redis.lists[resilience.EVENTS_QUEUE_KEY]) == 1
+
+    status_ok = client.get(
+        "/api/v1/system/status", HTTP_AUTHORIZATION=f"Bearer {admin_token}"
+    ).json()["data"]
+    assert status_ok["effectiveMode"] == "redis_queue"
+    assert status_ok["redis"]["ok"] is True
+    assert status_ok["redis"]["eventsQueueDepth"] == 1
+    assert status_ok["database"]["ok"] is True

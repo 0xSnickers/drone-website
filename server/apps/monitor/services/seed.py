@@ -42,6 +42,7 @@ def seed_demo_monitor_data_on_startup() -> None:
             path = paths[idx % len(paths)]
             visitor = f"vis_{idx % 8 + 1}"
             ip = f"203.0.113.{10 + (idx % 6)}"
+            release_sha = "5ae9c37f" if idx < 12 else "bed6bf9c"
             events.append(
                 Event(
                     project=project,
@@ -56,6 +57,7 @@ def seed_demo_monitor_data_on_startup() -> None:
                     browser="Chrome" if idx % 3 else "Safari",
                     os="macOS" if idx % 2 else "Windows",
                     device="desktop" if idx % 3 else "mobile",
+                    release=release_sha,
                     properties={},
                     occurred_at=ts,
                 )
@@ -74,6 +76,7 @@ def seed_demo_monitor_data_on_startup() -> None:
                         browser="Chrome",
                         os="macOS",
                         device="desktop",
+                        release=release_sha,
                         properties={"edition": "combo"},
                         occurred_at=ts,
                     )
@@ -123,6 +126,7 @@ def seed_demo_monitor_data_on_startup() -> None:
             browser="Chrome",
             os="macOS",
             device="desktop",
+            release="5ae9c37f",
             breadcrumbs=[
                 {"type": "click", "message": "button Checkout", "ts": int(now.timestamp() * 1000)}
             ],

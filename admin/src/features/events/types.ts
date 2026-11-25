@@ -33,6 +33,7 @@ export interface EventFilters {
   name?: string;
   visitorId?: string;
   ip?: string;
+  release?: string;
   page?: number;
   limit?: number;
 }

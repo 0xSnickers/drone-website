@@ -1,7 +1,10 @@
+# 构建上下文必须为仓库根目录（context: .），因为 web/vite.config.ts 直接引用 ../sdk/src/index.ts
 FROM node:26-slim AS builder
-WORKDIR /build/web
+WORKDIR /build
 
-COPY web/package.json web/package-lock.json ./
+COPY sdk/ ./sdk/
+COPY web/package.json web/package-lock.json ./web/
+WORKDIR /build/web
 RUN npm ci
 
 COPY web/ ./
@@ -10,12 +13,16 @@ ARG VITE_APP_NAME="AeroApex"
 ARG VITE_APP_ENV="production"
 ARG VITE_APP_RELEASE="unknown"
 ARG VITE_API_BASE_URL="/api"
+ARG VITE_MONITOR_ENDPOINT="/api"
+ARG VITE_MONITOR_APP_KEY=""
 ARG VITE_TELEMETRY_ENABLED="false"
 
 ENV VITE_APP_NAME="$VITE_APP_NAME" \
     VITE_APP_ENV="$VITE_APP_ENV" \
     VITE_APP_RELEASE="$VITE_APP_RELEASE" \
     VITE_API_BASE_URL="$VITE_API_BASE_URL" \
+    VITE_MONITOR_ENDPOINT="$VITE_MONITOR_ENDPOINT" \
+    VITE_MONITOR_APP_KEY="$VITE_MONITOR_APP_KEY" \
     VITE_TELEMETRY_ENABLED="$VITE_TELEMETRY_ENABLED"
 
 RUN npm run build

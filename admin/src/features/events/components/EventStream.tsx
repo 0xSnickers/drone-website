@@ -42,9 +42,11 @@ export function EventStream({
   const { t } = useTranslation();
   const f = useFormat();
   const [type, setType] = useState<EventType | undefined>('track');
+  const [release, setRelease] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
   const filters: EventFilters = {
     ...initial,
+    ...(release ? { release } : {}),
     type: initial.name ? 'track' : type,
     page,
     limit: 20,
@@ -58,6 +60,19 @@ export function EventStream({
         title={t('events.stream')}
         actions={
           <>
+            {release ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setRelease(undefined);
+                  setPage(1);
+                }}
+              >
+                <X />
+                {`${t('events.release')}: ${release.slice(0, 8)}`}
+              </Button>
+            ) : null}
             {initial.name || initial.visitorId || initial.ip ? (
               <Button variant="outline" size="sm" onClick={onClearName}>
                 <X />
@@ -100,6 +115,7 @@ export function EventStream({
                 <TableHead>{t('events.properties')}</TableHead>
                 <TableHead>{t('events.visitor')}</TableHead>
                 <TableHead>{t('events.ip')}</TableHead>
+                <TableHead>{t('events.release')}</TableHead>
                 <TableHead>{t('events.device')}</TableHead>
               </TableRow>
             </TableHeader>
@@ -136,6 +152,24 @@ export function EventStream({
                     >
                       {e.ip}
                     </Link>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {e.release ? (
+                      <button
+                        type="button"
+                        className="cursor-pointer"
+                        onClick={() => {
+                          setRelease(e.release ?? undefined);
+                          setPage(1);
+                        }}
+                      >
+                        <Badge variant="outline" className="font-mono">
+                          {e.release.slice(0, 8)}
+                        </Badge>
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{`${e.browser} · ${e.os}`}</TableCell>
                 </TableRow>

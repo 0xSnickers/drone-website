@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views.analytics import AudienceView, OverviewView, PagesView, TrendView
+from .views.analytics import AudienceView, OverviewView, PagesView, SystemStatusView, TrendView
 from .views.ingest import IngestEventsView, IngestLogsView
 from .views.projects import (
     IpRuleDeleteView,
@@ -25,6 +25,7 @@ from .views.queries import (
 urlpatterns = [
     path("ingest/events", IngestEventsView.as_view()),
     path("ingest/logs", IngestLogsView.as_view()),
+    path("system/status", SystemStatusView.as_view()),
     path("projects", ProjectListCreateView.as_view()),
     path("projects/<uuid:project_id>", ProjectDetailView.as_view()),
     path("projects/<uuid:project_id>/rotate-key", ProjectRotateKeyView.as_view()),

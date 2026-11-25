@@ -27,6 +27,7 @@ def list_events(project_id: str | None, window: TimeWindow, params, page: int, l
         ("visitor_id", "visitorId"),
         ("user_id", "userId"),
         ("ip", "ip"),
+        ("release", "release"),
     ):
         val = params.get(key)
         if val:
@@ -72,11 +73,16 @@ def list_issues(project_id: str | None, window: TimeWindow, params, page: int, l
         ErrorEvent.objects.filter(created_at__gte=window.start, created_at__lte=window.end),
         project_id,
     )
+    if params.get("release"):
+        ev_qs = ev_qs.filter(release=params["release"])
     issue_counts: Counter = Counter()
     issue_users: dict = defaultdict(set)
-    for row in ev_qs.only("issue_id", "visitor_id"):
+    latest_releases: dict = {}
+    for row in ev_qs.order_by("-created_at").only("issue_id", "visitor_id", "release"):
         issue_counts[row.issue_id] += 1
         issue_users[row.issue_id].add(row.visitor_id)
+        if row.release and row.issue_id not in latest_releases:
+            latest_releases[row.issue_id] = row.release
 
     qs = _filter_project(ErrorIssue.objects.filter(id__in=issue_counts.keys()), project_id)
     if params.get("status"):
@@ -101,6 +107,7 @@ def list_issues(project_id: str | None, window: TimeWindow, params, page: int, l
         data = ErrorIssueSerializer(issue).data
         data["rangeCount"] = issue_counts[issue.id]
         data["users"] = len(issue_users[issue.id])
+        data["latestRelease"] = latest_releases.get(issue.id)
         serialized.append(data)
     return page_result(serialized, total, page, limit)
 
@@ -115,22 +122,25 @@ def get_issue_detail(issue_id: str, window: TimeWindow) -> dict:
     users: set[str] = set()
     browsers: Counter[str] = Counter()
     systems: Counter[str] = Counter()
+    releases: Counter[str] = Counter()
 
     for row in ErrorEvent.objects.filter(
         issue=issue, created_at__gte=window.start, created_at__lte=window.end
-    ).only("created_at", "visitor_id", "browser", "os"):
+    ).only("created_at", "visitor_id", "browser", "os", "release"):
         b = floor_to_bucket(row.created_at, window.bucket, window.tz)
         if b in trend_map:
             trend_map[b] += 1
         users.add(row.visitor_id)
         browsers[row.browser or "Other"] += 1
         systems[row.os or "Other"] += 1
+        releases[row.release or "untagged"] += 1
 
     data = ErrorIssueSerializer(issue).data
     data["users"] = len(users)
     data["trend"] = [{"bucket": iso_utc(b), "count": trend_map[b]} for b in buckets]
     data["browsers"] = [{"name": n, "count": c} for n, c in browsers.most_common(10)]
     data["systems"] = [{"name": n, "count": c} for n, c in systems.most_common(10)]
+    data["releases"] = [{"name": n, "count": c} for n, c in releases.most_common(10)]
     return data
 
 

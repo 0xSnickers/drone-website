@@ -103,6 +103,7 @@ export function OccurrencePanel({ issueId }: { issueId: string }) {
                   className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent aria-selected:border-primary aria-selected:text-foreground"
                 >
                   {f.relative(o.createdAt)} · {o.browser}
+                  {o.release ? ` · ${o.release.slice(0, 8)}` : ''}
                 </button>
               ))}
             </div>

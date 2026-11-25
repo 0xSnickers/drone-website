@@ -87,6 +87,8 @@ services:
         VITE_APP_ENV: production
         VITE_APP_RELEASE: ${VITE_APP_RELEASE:-unknown}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        VITE_MONITOR_ENDPOINT: ${VITE_MONITOR_ENDPOINT:-/api}
+        VITE_MONITOR_APP_KEY: ${VITE_MONITOR_APP_KEY:-}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WEB_HOST_PORT:-5173}:80"

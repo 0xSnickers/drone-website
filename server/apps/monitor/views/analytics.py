@@ -4,7 +4,15 @@ from rest_framework.views import APIView
 from apps.core.responses import ok
 
 from ..services.analytics import get_audience, get_overview, get_top_pages, get_trend
+from ..services.system import get_system_status
 from ..utils import resolve_time_window
+
+
+class SystemStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return ok(get_system_status())
 
 
 class _AnalyticsBaseView(APIView):

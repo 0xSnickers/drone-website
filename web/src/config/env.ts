@@ -12,10 +12,12 @@ import {
  * 新增变量时同步更新 .env.example 和 src/vite-env.d.ts。
  */
 const envSchema = z.object({
-  VITE_APP_NAME: z.string().default('React App'),
+  VITE_APP_NAME: z.string().default('AeroApex'),
   VITE_APP_ENV: appEnvSchema,
   VITE_APP_RELEASE: optionalStringEnv(),
   VITE_API_BASE_URL: z.string().default('/api'),
+  VITE_MONITOR_ENDPOINT: z.string().default('/api'),
+  VITE_MONITOR_APP_KEY: optionalStringEnv(),
   VITE_TELEMETRY_ENABLED: booleanEnv(false),
   VITE_SENTRY_DSN: optionalStringEnv(),
   VITE_SENTRY_TRACES_SAMPLE_RATE: sampleRateEnv(0),
@@ -33,6 +35,10 @@ export const env = {
   appRelease: parsed.VITE_APP_RELEASE,
   isDev: import.meta.env.DEV,
   apiBaseUrl: parsed.VITE_API_BASE_URL,
+  monitor: {
+    endpoint: parsed.VITE_MONITOR_ENDPOINT,
+    appKey: parsed.VITE_MONITOR_APP_KEY,
+  },
   telemetry: {
     enabled: parsed.VITE_TELEMETRY_ENABLED,
     sentry: {

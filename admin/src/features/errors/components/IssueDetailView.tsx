@@ -113,9 +113,16 @@ export function IssueDetailView({
         isFetching={query.isFetching}
         height={160}
       />
-      <div className="grid gap-4 md:grid-cols-2">
+      <div
+        className={
+          issue.releases?.length ? 'grid gap-4 md:grid-cols-3' : 'grid gap-4 md:grid-cols-2'
+        }
+      >
         <Distribution title={t('errors.browsers')} rows={issue.browsers} />
         <Distribution title={t('errors.systems')} rows={issue.systems} />
+        {issue.releases?.length ? (
+          <Distribution title={t('errors.releases')} rows={issue.releases} />
+        ) : null}
       </div>
       <OccurrencePanel issueId={issue.id} />
     </div>

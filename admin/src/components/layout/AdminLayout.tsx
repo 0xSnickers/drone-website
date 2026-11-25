@@ -14,7 +14,9 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { NavLink, Outlet } from 'react-router';
+import { env } from '@/config/env';
 import { cn } from '@/core/utils/cn';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/features/auth';
 import { FilterBar } from '@/features/filters';
@@ -81,6 +83,17 @@ function Brand() {
   );
 }
 
+function BuildMeta() {
+  const { t } = useTranslation();
+  const shortSha = env.appRelease ? env.appRelease.slice(0, 8) : 'dev';
+  return (
+    <div className="mt-auto flex flex-wrap items-center justify-between gap-1.5 border-t px-3 pt-3 text-xs text-muted-foreground">
+      <span className="font-mono">{t('nav.releaseLabel', { release: shortSha })}</span>
+      <Badge variant="outline">{env.appEnv}</Badge>
+    </div>
+  );
+}
+
 /** 后台外壳：左侧导航（窄屏为抽屉）、顶部全局筛选 + 偏好 + 用户。 */
 export function AdminLayout() {
   const { t } = useTranslation();
@@ -94,6 +107,7 @@ export function AdminLayout() {
         <aside className="sticky top-0 flex h-screen flex-col gap-6 px-3 py-4">
           <Brand />
           <SideNav />
+          <BuildMeta />
         </aside>
       </div>
 

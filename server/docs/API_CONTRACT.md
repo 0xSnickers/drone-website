@@ -189,6 +189,7 @@
 
 | 方法 | 路径 | 权限 | 说明 / `data` |
 |---|---|---|---|
+| GET | `/api/v1/system/status` | Bearer | 容灾与队列健康状态 `{ service, ingestMode, effectiveMode, database, redis, protection }` |
 | GET | `/api/v1/projects` | Bearer | 分页 `project` |
 | GET | `/api/v1/projects/:id` | Bearer | `project` |
 | POST | `/api/v1/projects` | admin | `{ name(2~50), description?(≤200) }` → `project`（201，自动生成 `appKey`） |
@@ -199,10 +200,10 @@
 | GET | `/api/v1/analytics/trend` | Bearer | `[{ bucket, pv, uv, errors, requests, serverErrors }]` |
 | GET | `/api/v1/analytics/pages` | Bearer | 热门页面 `[{ path, pv, uv }]`（20 条） |
 | GET | `/api/v1/analytics/audience` | Bearer | `{ referrers, browsers, systems, devices }` |
-| GET | `/api/v1/events` | Bearer | 行为明细分页；筛选 `type` `name` `visitorId` `userId` `ip` `path` |
+| GET | `/api/v1/events` | Bearer | 行为明细分页；筛选 `type` `name` `visitorId` `userId` `ip` `path` `release` |
 | GET | `/api/v1/events/summary` | Bearer | 埋点汇总 `[{ name, count, visitors, lastSeen }]` |
-| GET | `/api/v1/errors/issues` | Bearer | 范围内发生过的问题分页（含 `rangeCount`、`users`）；筛选 `status` `type` `q`，`sort=frequent|recent` |
-| GET | `/api/v1/errors/issues/:id` | Bearer | 问题 + `{ trend, users, browsers, systems }` |
+| GET | `/api/v1/errors/issues` | Bearer | 范围内发生过的问题分页（含 `rangeCount`、`users`、`latestRelease`）；筛选 `status` `type` `q` `release`，`sort=frequent|recent` |
+| GET | `/api/v1/errors/issues/:id` | Bearer | 问题 + `{ trend, users, browsers, systems, releases }` |
 | GET | `/api/v1/errors/issues/:id/events` | Bearer | 发生记录分页（堆栈、breadcrumbs、环境） |
 | PUT | `/api/v1/errors/issues/:id` | admin | `{ status: open|resolved|ignored }` |
 | GET | `/api/v1/logs` | Bearer | 日志分页；筛选 `service` `level` `statusClass(2xx..5xx)` `requestId` `ip` `q` |

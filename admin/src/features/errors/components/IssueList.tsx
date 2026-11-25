@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
@@ -91,6 +93,19 @@ export function IssueList({ params, compact = false }: { params: RangeParams; co
             <option value="frequent">{t('errors.sortFrequent')}</option>
             <option value="recent">{t('errors.sortRecent')}</option>
           </Select>
+          {filters.release ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setFilters(({ release: _ignored, ...rest }) => ({ ...rest, page: 1 }))
+              }
+            >
+              <X />
+              {t('errors.filterRelease', { release: filters.release })}
+            </Button>
+          ) : null}
         </form>
       ) : null}
 
@@ -124,8 +139,19 @@ export function IssueList({ params, compact = false }: { params: RangeParams; co
                       >
                         {issue.message}
                       </Link>
-                      <div className="mt-1 flex items-center gap-2">
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
                         <ErrorTypeBadge type={issue.type} />
+                        {issue.latestRelease ? (
+                          <button
+                            type="button"
+                            onClick={() => !compact && set({ release: issue.latestRelease ?? undefined })}
+                            className={cn(!compact && 'cursor-pointer')}
+                          >
+                            <Badge variant="outline" className="font-mono">
+                              {issue.latestRelease.slice(0, 8)}
+                            </Badge>
+                          </button>
+                        ) : null}
                         <span className="text-xs text-muted-foreground">
                           {t('errors.count')} {f.number(issue.count)} · {t('errors.firstSeen')}{' '}
                           {f.relative(issue.firstSeen)}
